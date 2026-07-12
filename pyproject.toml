@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,8 @@ name = "conductor-main"
 version = "0.1.0"
 description = "Gradio client for Conductor Core"
 readme = "README.md"
+license = "LGPL-3.0-or-later"
+license-files = ["LICENSE", "COPYING", "COPYING.LESSER"]
 requires-python = ">=3.10"
 dependencies = [
     "conductor-core[providers,playback] @ git+https://github.com/laceyp99/conductor-core.git@v0.1.0",

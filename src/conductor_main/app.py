@@ -8,6 +8,7 @@ Features:
 - Toggleable history sidebar panel
 """
 
+import html
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -606,9 +607,14 @@ def render_history_html():
         timestamp_str = gen.timestamp.strftime("%b %d, %I:%M %p")
         cost_str = f"${gen.cost:.4f}" if gen.cost is not None else "N/A"
         prompt_preview = gen.prompt[:40] + "..." if len(gen.prompt) > 40 else gen.prompt
+        generation_id = html.escape(str(gen.id), quote=True)
+        key = html.escape(str(gen.key), quote=True)
+        scale = html.escape(str(gen.scale), quote=True)
+        prompt_preview = html.escape(prompt_preview, quote=True)
+        model = html.escape(str(gen.model), quote=True)
 
         html_parts.append(f"""
-        <div class="history-item" data-id="{gen.id}" style="
+        <div class="history-item" data-id="{generation_id}" style="
             background: #2a2a2a;
             border-radius: 8px;
             padding: 12px;
@@ -616,13 +622,13 @@ def render_history_html():
             border: 1px solid #444;
         ">
             <div style="font-weight: bold; color: #fff; margin-bottom: 4px;">
-                {gen.key} {gen.scale}
+                {key} {scale}
             </div>
             <div style="font-size: 0.85em; color: #aaa; margin-bottom: 6px;">
                 "{prompt_preview}"
             </div>
             <div style="font-size: 0.8em; color: #888; display: flex; justify-content: space-between;">
-                <span>{gen.model}</span>
+                <span>{model}</span>
                 <span>{timestamp_str}</span>
             </div>
             <div style="font-size: 0.75em; color: #666; margin-top: 4px;">

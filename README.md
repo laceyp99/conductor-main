@@ -30,10 +30,9 @@ compatible published `conductor-core` release first:
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\activate
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -e .
-$env:PYTHONUTF8 = "1"
-.\.venv\Scripts\conductor-main.exe
+pip install --upgrade pip
+pip install -e .
+conductor-main
 ```
 
 The app opens at `http://127.0.0.1:7860/`.

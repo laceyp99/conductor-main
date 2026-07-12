@@ -29,8 +29,8 @@ compatible published `conductor-core` release first:
 
 ```powershell
 py -3.12 -m venv .venv
+.\.venv\Scripts\activate
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install "conductor-core[providers,playback]"
 .\.venv\Scripts\python.exe -m pip install -e .
 $env:PYTHONUTF8 = "1"
 .\.venv\Scripts\conductor-main.exe

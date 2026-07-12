@@ -9,7 +9,7 @@ description = "Gradio client for Conductor Core"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "conductor-core",
+    "conductor-core[providers,playback] @ git+https://github.com/laceyp99/conductor-core.git@v0.1.0",
     "gradio==5.30.0",
     "mido==1.3.3",
     "plotly==6.0.1",

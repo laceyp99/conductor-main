@@ -9,6 +9,28 @@ Plotly piano roll. Core owns provider routing, generation, MIDI conversion,
 audio helpers, and persisted artifacts. This separation allows another UI or
 service to replace Conductor Main without rewriting the engine.
 
+## License
+
+Copyright (C) 2026 Conductor contributors.
+
+Conductor Main is free software: you can redistribute it and/or modify it
+under the terms of the GNU Lesser General Public License as published by the
+Free Software Foundation, either version 3 of the License, or (at your option)
+any later version.
+
+Conductor Main is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more
+details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with Conductor Main. If not, see <https://www.gnu.org/licenses/>. The complete
+LGPL text is in [LICENSE](LICENSE) and [COPYING.LESSER](COPYING.LESSER); the
+GNU GPL terms incorporated by the LGPL are in [COPYING](COPYING).
+
+The separately distributed `conductor-core` dependency and other third-party
+dependencies retain their own licenses.
+
 ## Features
 
 - Generate four-bar MIDI loops from a natural-language description.

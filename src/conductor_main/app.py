@@ -1,5 +1,5 @@
 """
-This file is using Gradio for the LoopGPT application. It makes the generation progress more user friendly by providing a GUI for the user to interact with.
+This file is using Gradio for the Conductor application. It makes the generation progress more user friendly by providing a GUI for the user to interact with.
 
 Features:
 - Text to MIDI generation with multiple AI providers
@@ -844,7 +844,7 @@ def create_demo(playback_status=None):
 
         # Header with title centered on the original full-width layout
         with gr.Row(elem_classes=["app-header"]):
-            gr.Markdown("<h1 class='center-title'>LoopGPT</h1>")
+            gr.Markdown("<h1 class='center-title'>Conductor</h1>")
             history_toggle_btn = gr.Button(
                 "History",
                 size="sm",

@@ -22,28 +22,20 @@ service to replace Conductor Main without rewriting the engine.
 - Preserve provider messages, cost, model settings, and artifact metadata.
 - Stop waiting for a long UI request without closing the application.
 
-## Installation on Windows
+## Installation
 
 Run these commands from the `conductor-main` project directory. Install a
 compatible published `conductor-core` release first:
 
-```powershell
+```
 py -3.12 -m venv .venv
 .\.venv\Scripts\activate
-pip install --upgrade pip
+python -m pip install --upgrade pip
 pip install -e .
 conductor-main
 ```
 
 The app opens at `http://127.0.0.1:7860/`.
-
-Use the explicit venv paths even if PowerShell activation succeeds. On Windows,
-`py -3.12 -m pip` targets the registered global interpreter rather than the
-active venv and can create a mixed environment. `PYTHONUTF8=1` also avoids
-Windows console encoding failures in tools that print Unicode status symbols.
-
-The former suite root `app.py` is only a transition launcher and is not part of
-the standalone project. Use the `conductor-main` entry point above.
 
 ## Provider setup
 
@@ -53,7 +45,7 @@ generation metadata.
 
 Core also recognizes these environment variables:
 
-```powershell
+```
 $env:OPENAI_API_KEY = "..."
 $env:GEMINI_API_KEY = "..."
 $env:ANTHROPIC_API_KEY = "..."
@@ -181,8 +173,8 @@ incur cost after the UI stops displaying progress.
 
 Confirm the launcher and interpreter come from the same environment:
 
-```powershell
-.\.venv\Scripts\python.exe -c "import sys; print(sys.executable)"
+```
+python -c "import sys; print(sys.executable)"
 where.exe conductor-main
 ```
 
@@ -210,9 +202,9 @@ re-render the saved MIDI.
 
 Install the development extra and run the client tests independently:
 
-```powershell
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m pytest -q
+```
+python -m pip install -e ".[dev]"
+python -m pytest -q
 ```
 
 The tests cover callback adaptation, model controls, SoundFont behavior,

@@ -392,6 +392,33 @@ def test_render_history_html_displays_missing_cost_as_na(monkeypatch):
     assert "Cost: N/A" in html
 
 
+def test_render_history_html_escapes_persisted_metadata(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "load_history",
+        lambda: [
+            SimpleNamespace(
+                id='"><script>alert(1)</script>',
+                timestamp=__import__("datetime").datetime(2026, 1, 1, 12, 0),
+                prompt="<img src=x onerror=alert(1)>",
+                key="<b>C</b>",
+                scale="<i>Major</i>",
+                model="<em>model</em>",
+                cost=0,
+            )
+        ],
+    )
+
+    rendered_history = app.render_history_html()
+
+    assert 'data-id="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"' in rendered_history
+    assert "&lt;b&gt;C&lt;/b&gt; &lt;i&gt;Major&lt;/i&gt;" in rendered_history
+    assert "&lt;img src=x onerror=alert(1)&gt;" in rendered_history
+    assert "&lt;em&gt;model&lt;/em&gt;" in rendered_history
+    assert "<script>alert(1)</script>" not in rendered_history
+    assert "<img src=x onerror=alert(1)>" not in rendered_history
+
+
 def test_refresh_soundfont_controls_stays_disabled_after_active_delete(monkeypatch):
     monkeypatch.setattr(app, "get_soundfont_choices", lambda: ["FM-Piano1 20190916.sf2", "new.sf2"])
     monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "new.sf2")

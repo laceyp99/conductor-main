@@ -507,13 +507,13 @@ def run_loop(
         yield None, None, None, "Working on it...", gr.update(visible=True), None, None, None
 
         # Run the synchronous Core engine in a background thread so the UI can stop waiting.
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(
-                engine.generate,
-                request,
-                handle_progress,
-            )
-
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(
+            engine.generate,
+            request,
+            handle_progress,
+        )
+        try:
             # Poll for completion, yielding periodically so Gradio can interrupt the wait.
             while not future.done():
                 try:
@@ -538,6 +538,11 @@ def run_loop(
 
             # Get the result (will raise exception if the API call failed)
             result = future.result()
+        finally:
+            # Generator cancellation raises GeneratorExit at a yield. Do not wait for an
+            # in-flight provider call here: Stop Waiting only detaches the UI and the
+            # provider request may still complete and incur cost in the background.
+            executor.shutdown(wait=False)
 
         print(f"Total cost: {result.cost}")
         visualization = visualize_midi_plotly(MidiFile(result.midi_path))

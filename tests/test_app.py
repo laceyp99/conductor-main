@@ -1,4 +1,5 @@
 from pathlib import Path
+from threading import Event, Thread
 from types import SimpleNamespace
 
 from conductor_main import app
@@ -100,6 +101,57 @@ def test_run_loop_reports_core_generation_errors(monkeypatch):
 
     assert outputs[-1][3] == "provider failed"
     assert outputs[-1][4] == {"visible": False}
+
+
+def test_run_loop_close_does_not_wait_for_in_flight_provider_call(monkeypatch):
+    provider_started = Event()
+    release_provider = Event()
+    provider_finished = Event()
+    close_finished = Event()
+
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+    monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "custom.sf2")
+
+    class SlowEngine:
+        def __init__(self, config):
+            pass
+
+        def generate(self, request, progress_callback=None):
+            provider_started.set()
+            release_provider.wait()
+            provider_finished.set()
+
+    monkeypatch.setattr(app, "LoopGenerationEngine", SlowEngine)
+    generator = app.run_loop(
+        key="C",
+        scale="Major",
+        description="warm rhodes loop",
+        temp=0.3,
+        model_choice="gpt-test",
+        use_thinking=False,
+        effort="low",
+        soundfont_choice="custom.sf2",
+        openai_key="",
+        gemini_key="",
+        claude_key="",
+    )
+
+    closer = None
+    try:
+        next(generator)
+        next(generator)
+        assert provider_started.wait(timeout=1)
+
+        closer = Thread(target=lambda: (generator.close(), close_finished.set()))
+        closer.start()
+
+        assert close_finished.wait(timeout=1)
+        assert not provider_finished.is_set()
+    finally:
+        release_provider.set()
+        assert provider_finished.wait(timeout=1)
+        if closer is not None:
+            closer.join(timeout=1)
 
 
 def test_get_selected_soundfont_prefers_requested_choice(monkeypatch):

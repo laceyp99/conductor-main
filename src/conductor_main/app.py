@@ -40,21 +40,38 @@ from conductor_main.visualization import visualize_midi_plotly
 
 DEFAULT_PROVIDER = "Google"
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CONDUCTOR_APP_DIRNAME = "eval"
+
+
+def _resolve_conductor_home() -> Path:
+    """Resolve the shared root for mutable Conductor suite data."""
+    conductor_home = os.environ.get("CONDUCTOR_HOME")
+    if conductor_home:
+        return Path(conductor_home).expanduser()
+
+    return Path.home() / ".conductor"
 
 
 def _resolve_app_data_dir() -> Path:
-    """Resolve the app data directory (project-local by default)."""
-    return Path(os.environ.get("CONDUCTOR_MAIN_DATA_DIR", PROJECT_ROOT)).expanduser()
+    """Resolve the mutable data directory owned by this client."""
+    app_data_dir = os.environ.get("CONDUCTOR_MAIN_DATA_DIR")
+    if app_data_dir:
+        return Path(app_data_dir).expanduser()
+
+    return _resolve_conductor_home() / CONDUCTOR_APP_DIRNAME
+
+
+def _resolve_app_soundfont_dir() -> Path:
+    """Resolve the directory for user-supplied SoundFonts."""
+    soundfont_dir = os.environ.get("CONDUCTOR_MAIN_SOUNDFONT_DIR")
+    if soundfont_dir:
+        return Path(soundfont_dir).expanduser()
+
+    return _resolve_app_data_dir() / "soundfonts"
 
 
 APP_DATA_DIR = _resolve_app_data_dir()
-APP_SOUNDFONT_DIR = Path(
-    os.environ.get(
-        "CONDUCTOR_MAIN_SOUNDFONT_DIR",
-        PROJECT_ROOT / "soundfonts",
-    )
-).expanduser()
+APP_SOUNDFONT_DIR = _resolve_app_soundfont_dir()
 PROMPT_OVERRIDE_PATH = APP_DATA_DIR / "Prompts" / "loop gen.txt"
 
 add_soundfont_search_dir(APP_SOUNDFONT_DIR)

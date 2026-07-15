@@ -500,13 +500,78 @@ def test_main_allows_gradio_to_serve_generation_history(monkeypatch, tmp_path):
     assert launched_with == {"allowed_paths": [str(artifact_root.resolve())]}
 
 
-def test_app_data_dir_defaults_to_the_project_directory(monkeypatch):
+def _clear_data_directory_environment(monkeypatch):
     monkeypatch.delenv("CONDUCTOR_MAIN_DATA_DIR", raising=False)
+    monkeypatch.delenv("CONDUCTOR_MAIN_SOUNDFONT_DIR", raising=False)
+    monkeypatch.delenv("CONDUCTOR_HOME", raising=False)
 
-    assert app._resolve_app_data_dir() == Path(app.__file__).resolve().parents[2]
+
+def test_app_data_dir_defaults_to_the_conductor_eval_directory(monkeypatch, tmp_path):
+    _clear_data_directory_environment(monkeypatch)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    assert app._resolve_conductor_home() == tmp_path / ".conductor"
+    assert app._resolve_app_data_dir() == tmp_path / ".conductor" / "eval"
+    assert app._resolve_app_soundfont_dir() == tmp_path / ".conductor" / "eval" / "soundfonts"
+
+
+def test_app_data_dir_honors_conductor_home(monkeypatch, tmp_path):
+    _clear_data_directory_environment(monkeypatch)
+    conductor_home = tmp_path / "suite-data"
+    monkeypatch.setenv("CONDUCTOR_HOME", str(conductor_home))
+
+    assert app._resolve_conductor_home() == conductor_home
+    assert app._resolve_app_data_dir() == conductor_home / "eval"
+
+
+def test_app_data_dir_override_wins_over_conductor_home(monkeypatch, tmp_path):
+    _clear_data_directory_environment(monkeypatch)
+    app_data_dir = tmp_path / "main-data"
+    monkeypatch.setenv("CONDUCTOR_HOME", str(tmp_path / "suite-data"))
+    monkeypatch.setenv("CONDUCTOR_MAIN_DATA_DIR", str(app_data_dir))
+
+    assert app._resolve_app_data_dir() == app_data_dir
+    assert app._resolve_app_soundfont_dir() == app_data_dir / "soundfonts"
+
+
+def test_soundfont_dir_override_wins_over_app_data_dir(monkeypatch, tmp_path):
+    _clear_data_directory_environment(monkeypatch)
+    soundfont_dir = tmp_path / "shared-soundfonts"
+    monkeypatch.setenv("CONDUCTOR_MAIN_DATA_DIR", str(tmp_path / "main-data"))
+    monkeypatch.setenv("CONDUCTOR_MAIN_SOUNDFONT_DIR", str(soundfont_dir))
+
+    assert app._resolve_app_soundfont_dir() == soundfont_dir
+
+
+def test_data_directory_overrides_expand_user_home(monkeypatch, tmp_path):
+    _clear_data_directory_environment(monkeypatch)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("CONDUCTOR_HOME", "~/suite-data")
+
+    assert app._resolve_conductor_home() == tmp_path / "suite-data"
+
+    monkeypatch.setenv("CONDUCTOR_MAIN_DATA_DIR", "~/main-data")
+    monkeypatch.setenv("CONDUCTOR_MAIN_SOUNDFONT_DIR", "~/shared-soundfonts")
+
+    assert app._resolve_app_data_dir() == tmp_path / "main-data"
+    assert app._resolve_app_soundfont_dir() == tmp_path / "shared-soundfonts"
+
+
+def test_app_data_dir_is_independent_of_installed_module_path(monkeypatch, tmp_path):
+    _clear_data_directory_environment(monkeypatch)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setattr(
+        app,
+        "__file__",
+        str(tmp_path / "venv" / "Lib" / "site-packages" / "conductor_main" / "app.py"),
+    )
+
+    assert app._resolve_app_data_dir() == tmp_path / "home" / ".conductor" / "eval"
 
 
 def test_app_data_dir_honors_environment_override(monkeypatch, tmp_path):
+    _clear_data_directory_environment(monkeypatch)
     monkeypatch.setenv("CONDUCTOR_MAIN_DATA_DIR", str(tmp_path))
 
     assert app._resolve_app_data_dir() == tmp_path

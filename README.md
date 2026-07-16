@@ -104,17 +104,17 @@ local Ollama generations normally have zero API cost.
 ## Data directory
 
 Conductor applications share a single user-accessible data root. By default,
-this client owns the `eval` directory below that root:
+this client owns the `main` directory below that root:
 
 ```text
-~/.conductor/eval/
+~/.conductor/main/
 ├── generations/       # retained MIDI, audio, messages, and metadata
 ├── Prompts/           # durable prompt overrides
 └── soundfonts/         # user-supplied SoundFonts
 ```
 
 On Windows, `~` normally expands to `%USERPROFILE%`, so the same location is
-`%USERPROFILE%\.conductor\eval`. These files survive repository, virtual
+`%USERPROFILE%\.conductor\main`. These files survive repository, virtual
 environment, and package replacement. Back up `Prompts` and any user-supplied
 SoundFonts as durable user data. Generation history is retained to the newest
 20 items and can be deleted through the History sidebar when reclaiming space.
@@ -122,8 +122,8 @@ SoundFonts as durable user data. Generation history is retained to the newest
 The location precedence is:
 
 1. `CONDUCTOR_MAIN_DATA_DIR` selects this client's complete data directory;
-2. `CONDUCTOR_HOME` selects the shared suite root and this client appends `eval`;
-3. the default is `~/.conductor/eval`.
+2. `CONDUCTOR_HOME` selects the shared suite root and this client appends `main`;
+3. the default is `~/.conductor/main`.
 
 `CONDUCTOR_MAIN_SOUNDFONT_DIR` independently overrides only the directory used
 for user-supplied SoundFonts. For example, PowerShell users can relocate the
@@ -131,7 +131,7 @@ whole suite or just this client:
 
 ```powershell
 $env:CONDUCTOR_HOME = "D:\ConductorData"
-$env:CONDUCTOR_MAIN_DATA_DIR = "D:\ConductorData\custom-eval"
+$env:CONDUCTOR_MAIN_DATA_DIR = "D:\ConductorData\custom-main"
 $env:CONDUCTOR_MAIN_SOUNDFONT_DIR = "D:\Music\SoundFonts"
 ```
 
@@ -142,7 +142,7 @@ working directory, while paths beginning with `~` expand to the user home.
 
 The app discovers packaged and user-available `.sf2` SoundFonts through Core.
 Core ships the default SoundFont; drop additional `.sf2` files into the
-`~/.conductor/eval/soundfonts/` directory (or the directory set by
+`~/.conductor/main/soundfonts/` directory (or the directory set by
 `CONDUCTOR_MAIN_SOUNDFONT_DIR`) to make them selectable. Audio rendering
 requires all of the following:
 
@@ -170,7 +170,7 @@ Click **History** to open the recent-generation sidebar. From there you can:
 By default, the app keeps the newest 20 generations under its data directory:
 
 ```text
-~/.conductor/eval/generations/
+~/.conductor/main/generations/
 └── gen_<id>/
     ├── loop.mid
     ├── loop.mp3        # when audio rendering succeeds
@@ -186,7 +186,7 @@ keeps the saved audio available and identifies the missing selection.
 
 The **Prompt Editor** tab displays the current loop-generation system prompt.
 Saving creates or updates the app-owned override at
-`~/.conductor/eval/Prompts/loop gen.txt`. The data-directory variables described
+`~/.conductor/main/Prompts/loop gen.txt`. The data-directory variables described
 above relocate both this override and generation history.
 Subsequent generations use that override instead of Core's packaged default.
 

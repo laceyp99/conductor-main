@@ -506,13 +506,13 @@ def _clear_data_directory_environment(monkeypatch):
     monkeypatch.delenv("CONDUCTOR_HOME", raising=False)
 
 
-def test_app_data_dir_defaults_to_the_conductor_eval_directory(monkeypatch, tmp_path):
+def test_app_data_dir_defaults_to_the_conductor_main_directory(monkeypatch, tmp_path):
     _clear_data_directory_environment(monkeypatch)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
     assert app._resolve_conductor_home() == tmp_path / ".conductor"
-    assert app._resolve_app_data_dir() == tmp_path / ".conductor" / "eval"
-    assert app._resolve_app_soundfont_dir() == tmp_path / ".conductor" / "eval" / "soundfonts"
+    assert app._resolve_app_data_dir() == tmp_path / ".conductor" / "main"
+    assert app._resolve_app_soundfont_dir() == tmp_path / ".conductor" / "main" / "soundfonts"
 
 
 def test_app_data_dir_honors_conductor_home(monkeypatch, tmp_path):
@@ -521,7 +521,7 @@ def test_app_data_dir_honors_conductor_home(monkeypatch, tmp_path):
     monkeypatch.setenv("CONDUCTOR_HOME", str(conductor_home))
 
     assert app._resolve_conductor_home() == conductor_home
-    assert app._resolve_app_data_dir() == conductor_home / "eval"
+    assert app._resolve_app_data_dir() == conductor_home / "main"
 
 
 def test_app_data_dir_override_wins_over_conductor_home(monkeypatch, tmp_path):
@@ -567,7 +567,7 @@ def test_app_data_dir_is_independent_of_installed_module_path(monkeypatch, tmp_p
         str(tmp_path / "venv" / "Lib" / "site-packages" / "conductor_main" / "app.py"),
     )
 
-    assert app._resolve_app_data_dir() == tmp_path / "home" / ".conductor" / "eval"
+    assert app._resolve_app_data_dir() == tmp_path / "home" / ".conductor" / "main"
 
 
 def test_app_data_dir_honors_environment_override(monkeypatch, tmp_path):

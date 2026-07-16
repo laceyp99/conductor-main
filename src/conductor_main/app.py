@@ -40,7 +40,7 @@ from conductor_main.visualization import visualize_midi_plotly
 
 DEFAULT_PROVIDER = "Google"
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
-CONDUCTOR_APP_DIRNAME = "eval"
+CONDUCTOR_APP_DIRNAME = "main"
 
 
 def _resolve_conductor_home() -> Path:

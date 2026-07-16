@@ -196,23 +196,6 @@ intact; an invalid or ambiguous schema can cause provider parsing failures.
 
 Deleting the override file returns the app to Core's packaged prompt.
 
-### Migrating project-local data
-
-Versions that defaulted to the repository directory do not move or delete that
-data automatically. To keep using the old location temporarily, start the app
-from the repository after setting:
-
-```powershell
-$env:CONDUCTOR_MAIN_DATA_DIR = $PWD
-conductor-main
-```
-
-To adopt the new default, close the app and copy any existing `generations`,
-`Prompts`, and `soundfonts` directories into
-`%USERPROFILE%\.conductor\eval`. Review destination contents before copying so
-that newer files are not overwritten. Once the migrated history and prompt load
-correctly, the old ignored directories can be removed manually if desired.
-
 ## Stop Waiting behavior
 
 Generation runs in a background thread so Gradio can continue yielding status

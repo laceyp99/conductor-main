@@ -7,11 +7,8 @@ htmlcov/
 build/
 dist/
 *.egg-info/
-generations/
-Prompts/
 *.mid
 *.mp3
-soundfonts/*.sf2
 [.]env
 .venv/
 venv/

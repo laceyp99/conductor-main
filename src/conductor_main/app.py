@@ -41,6 +41,7 @@ from conductor_main.visualization import visualize_midi_plotly
 DEFAULT_PROVIDER = "Google"
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 CONDUCTOR_APP_DIRNAME = "main"
+MAX_HISTORY_GENERATIONS = 20
 
 
 def _resolve_conductor_home() -> Path:
@@ -75,7 +76,10 @@ APP_SOUNDFONT_DIR = _resolve_app_soundfont_dir()
 PROMPT_OVERRIDE_PATH = APP_DATA_DIR / "Prompts" / "loop gen.txt"
 
 add_soundfont_search_dir(APP_SOUNDFONT_DIR)
-HISTORY_STORE = FilesystemArtifactStore(APP_DATA_DIR / "generations")
+HISTORY_STORE = FilesystemArtifactStore(
+    APP_DATA_DIR / "generations",
+    max_generations=MAX_HISTORY_GENERATIONS,
+)
 
 
 def load_history():
@@ -502,6 +506,7 @@ def run_loop(
                 provider_credentials=credentials,
                 prompt_override=load_app_prompt_override(),
                 default_soundfont_path=selected_soundfont,
+                max_generations=MAX_HISTORY_GENERATIONS,
             )
         )
         request = GenerationRequest(

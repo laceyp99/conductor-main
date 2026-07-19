@@ -5,7 +5,7 @@ on:
   pull_request:
 
 env:
-  CONDUCTOR_CORE_SPEC: "conductor-core @ git+https://github.com/laceyp99/conductor-core.git@v0.1.0"
+  CONDUCTOR_CORE_SPEC: "conductor-core @ git+https://github.com/laceyp99/conductor-core.git@v0.2.0"
 
 jobs:
   validate:

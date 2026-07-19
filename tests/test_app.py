@@ -66,6 +66,8 @@ def test_run_loop_passes_ui_configuration_to_core(monkeypatch, tmp_path):
     assert captured["config"].provider_credentials.anthropic_api_key == "claude-key"
     assert captured["config"].default_soundfont_path == "custom.sf2"
     assert captured["config"].max_generations == app.MAX_HISTORY_GENERATIONS
+    assert captured["request"].provider is None
+    assert captured["request"].effort == "low"
     assert captured["request"].render_audio is True
     assert captured["request"].soundfont_path == "custom.sf2"
     assert captured["request"].description == "warm rhodes loop"
@@ -177,6 +179,19 @@ def test_default_model_exists_in_model_metadata():
 
     assert app.DEFAULT_PROVIDER in model_info["models"]
     assert app.DEFAULT_MODEL in model_info["models"][app.DEFAULT_PROVIDER]
+
+
+def test_model_settings_use_core_supported_effort_values():
+    model_info = app.get_model_info()
+
+    for provider, models in model_info["models"].items():
+        for model, metadata in models.items():
+            effort_options = metadata.get("effort_options", [])
+            if effort_options:
+                settings = app.get_model_settings(provider, model)
+
+                assert settings["effort_options"] == effort_options
+                assert settings["effort_value"] in effort_options
 
 
 def test_history_store_uses_the_app_retention_policy():

@@ -65,6 +65,7 @@ def test_run_loop_passes_ui_configuration_to_core(monkeypatch, tmp_path):
     assert captured["config"].provider_credentials.google_api_key == "gemini-key"
     assert captured["config"].provider_credentials.anthropic_api_key == "claude-key"
     assert captured["config"].default_soundfont_path == "custom.sf2"
+    assert captured["config"].max_generations == app.MAX_HISTORY_GENERATIONS
     assert captured["request"].render_audio is True
     assert captured["request"].soundfont_path == "custom.sf2"
     assert captured["request"].description == "warm rhodes loop"
@@ -176,6 +177,10 @@ def test_default_model_exists_in_model_metadata():
 
     assert app.DEFAULT_PROVIDER in model_info["models"]
     assert app.DEFAULT_MODEL in model_info["models"][app.DEFAULT_PROVIDER]
+
+
+def test_history_store_uses_the_app_retention_policy():
+    assert app.HISTORY_STORE.max_generations == app.MAX_HISTORY_GENERATIONS
 
 
 def test_prompt_override_uses_the_app_data_directory(monkeypatch, tmp_path):

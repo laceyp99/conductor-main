@@ -517,7 +517,10 @@ def test_main_allows_gradio_to_serve_generation_history(monkeypatch, tmp_path):
 
     app.main()
 
-    assert launched_with == {"allowed_paths": [str(artifact_root.resolve())]}
+    assert launched_with == {
+        "allowed_paths": [str(artifact_root.resolve())],
+        "css": app.APP_CSS,
+    }
 
 
 def _clear_data_directory_environment(monkeypatch):

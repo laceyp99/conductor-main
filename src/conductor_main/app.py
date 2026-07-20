@@ -42,6 +42,29 @@ DEFAULT_PROVIDER = "Google"
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 CONDUCTOR_APP_DIRNAME = "main"
 MAX_HISTORY_GENERATIONS = 20
+APP_CSS = """
+.center-title { text-align: center; font-size: 3em; }
+.app-header {
+    position: relative;
+}
+.app-header .history-toggle {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 1;
+}
+.history-sidebar {
+    background: #1a1a1a;
+    border-left: 1px solid #333;
+    height: 100%;
+    overflow-y: auto;
+}
+.history-item:hover {
+    border-color: #666 !important;
+    cursor: pointer;
+}
+"""
 
 
 def _resolve_conductor_home() -> Path:
@@ -844,31 +867,7 @@ def create_demo(playback_status=None):
 
     playback_available, playback_error = playback_status
 
-    with gr.Blocks(
-        css="""
-        .center-title { text-align: center; font-size: 3em; }
-        .app-header {
-            position: relative;
-        }
-        .app-header .history-toggle {
-            position: absolute;
-            right: 0;
-            top: 50%;
-            transform: translateY(-50%);
-            z-index: 1;
-        }
-        .history-sidebar {
-            background: #1a1a1a;
-            border-left: 1px solid #333;
-            height: 100%;
-            overflow-y: auto;
-        }
-        .history-item:hover {
-            border-color: #666 !important;
-            cursor: pointer;
-        }
-        """
-    ) as demo:
+    with gr.Blocks() as demo:
         # State for sidebar visibility
         sidebar_visible = gr.State(value=False)
         current_generation_id = gr.State(value=None)
@@ -1251,7 +1250,10 @@ def main():
         print(f"Warning: {get_playback_status_message(default_soundfont)}")
 
     demo = create_demo(playback_status=playback_status)
-    demo.launch(allowed_paths=[str(Path(HISTORY_STORE.artifact_root).resolve())])
+    demo.launch(
+        allowed_paths=[str(Path(HISTORY_STORE.artifact_root).resolve())],
+        css=APP_CSS,
+    )
 
 
 if __name__ == "__main__":

@@ -502,6 +502,29 @@ def test_refresh_soundfont_controls_stays_disabled_after_active_delete(monkeypat
     assert rerender_update["interactive"] is False
 
 
+def test_history_toggle_resizes_piano_roll_after_sidebar_update():
+    demo = app.create_demo(playback_status=(True, None))
+    dependencies = demo.config["dependencies"]
+    toggle_dependency = next(
+        dependency
+        for dependency in dependencies
+        if dependency["api_name"] == "toggle_history_sidebar"
+    )
+    resize_dependency = next(
+        dependency for dependency in dependencies if dependency["js"] == app.PIANO_ROLL_RESIZE_JS
+    )
+
+    piano_roll = next(
+        component
+        for component in demo.config["components"]
+        if component["props"].get("elem_id") == "piano-roll"
+    )
+
+    assert piano_roll["type"] == "plot"
+    assert resize_dependency["trigger_after"] == toggle_dependency["id"]
+    assert resize_dependency["queue"] is False
+
+
 def test_main_allows_gradio_to_serve_generation_history(monkeypatch, tmp_path):
     artifact_root = tmp_path / "app-data" / "generations"
     launched_with = {}

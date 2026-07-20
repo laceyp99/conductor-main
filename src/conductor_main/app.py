@@ -859,6 +859,22 @@ def refresh_history():
     return gr.update(choices=choices, value=None), render_history_html()
 
 
+PIANO_ROLL_RESIZE_JS = """
+() => {
+    const resizePianoRoll = () => {
+        const pianoRoll = document.querySelector("#piano-roll .js-plotly-plot");
+        if (pianoRoll && window.Plotly?.Plots?.resize) {
+            window.Plotly.Plots.resize(pianoRoll);
+        }
+        window.dispatchEvent(new Event("resize"));
+    };
+
+    requestAnimationFrame(() => requestAnimationFrame(resizePianoRoll));
+    setTimeout(resizePianoRoll, 150);
+}
+"""
+
+
 def create_demo(playback_status=None):
     """Build and return the Gradio demo."""
     default_soundfont = get_selected_soundfont()
@@ -997,7 +1013,7 @@ def create_demo(playback_status=None):
                                 interactive=rerender_available(default_soundfont, None),
                             )
 
-                    vis_output = gr.Plot(label="MIDI Visualization")
+                    vis_output = gr.Plot(label="MIDI Visualization", elem_id="piano-roll")
                     error_message = gr.Textbox(label="Error Message", interactive=False)
 
                     # Update model choices when provider changes
@@ -1160,7 +1176,7 @@ def create_demo(playback_status=None):
                 )
 
         # History sidebar toggle
-        history_toggle_btn.click(
+        history_toggle_event = history_toggle_btn.click(
             toggle_history_sidebar,
             inputs=[sidebar_visible],
             outputs=[
@@ -1171,6 +1187,7 @@ def create_demo(playback_status=None):
                 history_dropdown,
             ],
         )
+        history_toggle_event.then(fn=None, js=PIANO_ROLL_RESIZE_JS, queue=False)
 
         # Load history item into main view
         load_btn.click(

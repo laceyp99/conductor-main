@@ -5,7 +5,7 @@ on:
   pull_request:
 
 env:
-  CONDUCTOR_CORE_SPEC: "conductor-core @ git+https://github.com/laceyp99/conductor-core.git@v0.2.0"
+  CONDUCTOR_CORE_SPEC: "conductor-core @ git+https://github.com/laceyp99/conductor-core.git@0132ee6fd1de1879713fd356fb507b7e937bf66c"
 
 jobs:
   validate:
@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install tagged Core dependency
+      - name: Install pinned Core dependency
         run: python -m pip install "$CONDUCTOR_CORE_SPEC"
       - name: Install package
         run: python -m pip install --upgrade pip build && python -m pip install -e ".[dev]"

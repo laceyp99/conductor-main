@@ -2,6 +2,8 @@ from pathlib import Path
 from threading import Event, Thread
 from types import SimpleNamespace
 
+from conductor_core.storage import GenerationMetadata
+
 from conductor_main import app
 
 
@@ -181,6 +183,25 @@ def test_default_model_exists_in_model_metadata():
     assert app.DEFAULT_MODEL in model_info["models"][app.DEFAULT_PROVIDER]
 
 
+def test_core_legacy_generation_metadata_defaults_reasoning_to_none():
+    metadata = GenerationMetadata.model_validate(
+        {
+            "id": "legacy",
+            "timestamp": "2026-07-21T12:00:00Z",
+            "prompt": "legacy prompt",
+            "key": "C",
+            "scale": "Major",
+            "model": "legacy-model",
+            "provider": "OpenAI",
+            "temperature": 0.1,
+            "midi_path": "loop.mid",
+        }
+    )
+
+    assert metadata.use_thinking is None
+    assert metadata.effort is None
+
+
 def test_model_settings_use_core_supported_effort_values():
     model_info = app.get_model_info()
 
@@ -192,6 +213,152 @@ def test_model_settings_use_core_supported_effort_values():
 
                 assert settings["effort_options"] == effort_options
                 assert settings["effort_value"] in effort_options
+
+
+def test_history_controls_restore_known_effort_model_exactly(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_model_info",
+        lambda: {
+            "models": {
+                "OpenAI": {
+                    "reasoning-model": {
+                        "extended_thinking": True,
+                        "effort_options": ["low", "medium", "high"],
+                    }
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    updates = app.get_history_control_updates(
+        SimpleNamespace(
+            key="F#/Gb",
+            scale="minor",
+            prompt="restored prompt",
+            provider="OpenAI",
+            model="reasoning-model",
+            temperature=0.7,
+            use_thinking=False,
+            effort="high",
+        )
+    )
+
+    assert updates.key == {"value": "F#/Gb"}
+    assert updates.scale == {"value": "minor"}
+    assert updates.description == {"value": "restored prompt"}
+    assert updates.provider["value"] == "OpenAI"
+    assert updates.model["value"] == "reasoning-model"
+    assert updates.temperature == {"visible": False, "value": 0.7}
+    assert updates.use_thinking == {"visible": False, "value": False}
+    assert updates.effort == {
+        "choices": ["low", "medium", "high"],
+        "value": "high",
+        "visible": True,
+    }
+    assert updates.warnings == ()
+
+
+def test_history_controls_restore_known_toggle_model_exactly(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_model_info",
+        lambda: {
+            "models": {
+                "Anthropic": {"toggle-model": {"extended_thinking": True, "effort_options": []}}
+            }
+        },
+    )
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    updates = app.get_history_control_updates(
+        SimpleNamespace(
+            key="C",
+            scale="Major",
+            prompt="think deeply",
+            provider="Anthropic",
+            model="toggle-model",
+            temperature=0.4,
+            use_thinking=True,
+            effort="low",
+        )
+    )
+
+    assert updates.temperature == {"visible": False, "value": 0.4}
+    assert updates.use_thinking == {"visible": True, "value": True}
+    assert updates.effort == {"choices": ["low"], "value": "low", "visible": False}
+    assert updates.warnings == ()
+
+
+def test_history_controls_use_defaults_and_warn_for_legacy_reasoning(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_model_info",
+        lambda: {
+            "models": {
+                "Anthropic": {"toggle-model": {"extended_thinking": True, "effort_options": []}}
+            }
+        },
+    )
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    updates = app.get_history_control_updates(
+        SimpleNamespace(
+            key="C",
+            scale="Major",
+            prompt="legacy",
+            provider="Anthropic",
+            model="toggle-model",
+            temperature=0.2,
+            use_thinking=None,
+            effort=None,
+        )
+    )
+
+    assert updates.use_thinking == {"visible": True, "value": False}
+    assert updates.effort == {"choices": ["low"], "value": "low", "visible": False}
+    assert "were not recorded" in updates.warnings[0]
+
+
+def test_history_controls_preserve_unavailable_provider_and_model_without_discovery(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_model_info",
+        lambda: {"models": {"OpenAI": {"current-model": {}}}},
+    )
+    monkeypatch.setattr(
+        app.ollama_api,
+        "get_ollama_status",
+        lambda: (_ for _ in ()).throw(AssertionError("must not discover Ollama")),
+    )
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    updates = app.get_history_control_updates(
+        SimpleNamespace(
+            key="C",
+            scale="Major",
+            prompt="local history",
+            provider="Ollama",
+            model="retired-local-model",
+            temperature=0.5,
+            use_thinking=True,
+            effort="medium",
+        )
+    )
+
+    assert updates.provider["choices"][-1] == ("Ollama (unavailable)", "Ollama")
+    assert updates.provider["value"] == "Ollama"
+    assert updates.model["choices"] == [
+        ("retired-local-model (unavailable)", "retired-local-model")
+    ]
+    assert updates.model["value"] == "retired-local-model"
+    assert updates.use_thinking["value"] is True
+    assert updates.effort["value"] == "medium"
+    assert any("Saved provider Ollama is unavailable" in warning for warning in updates.warnings)
+    assert any(
+        "Saved model retired-local-model is unavailable" in warning for warning in updates.warnings
+    )
 
 
 def test_history_store_uses_the_app_retention_policy():
@@ -284,6 +451,14 @@ def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tm
             audio_path=str(audio_path),
             soundfont="missing.sf2",
             id=gen_id,
+            key="D",
+            scale="minor",
+            prompt="saved prompt",
+            provider="Google",
+            model=app.DEFAULT_MODEL,
+            temperature=0.6,
+            use_thinking=False,
+            effort="low",
         ),
     )
     monkeypatch.setattr(app, "MidiFile", lambda path: object())
@@ -301,17 +476,58 @@ def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tm
         saved_soundfont,
         current_audio_path,
         rerender_update,
+        key_update,
+        scale_update,
+        description_update,
+        provider_update,
+        model_update,
+        temperature_update,
+        thinking_update,
+        effort_update,
     ) = app.load_history_item("gen_1")
 
     assert loaded_midi_path == str(midi_path)
     assert loaded_audio_path == str(audio_path)
     assert dropdown_update["value"] == "FM-Piano1 20190916.sf2"
     assert visualization == "viz"
-    assert error_message == "Previously used SoundFont: missing.sf2 (missing)"
+    assert error_message == "Previously used SoundFont: missing.sf2 (missing)."
     assert generation_id == "gen_1"
     assert saved_soundfont == "missing.sf2"
     assert current_audio_path == str(audio_path)
     assert rerender_update["interactive"] is True
+    assert key_update["value"] == "D"
+    assert scale_update["value"] == "minor"
+    assert description_update["value"] == "saved prompt"
+    assert provider_update["value"] == "Google"
+    assert model_update["value"] == app.DEFAULT_MODEL
+    assert temperature_update["value"] == 0.6
+    assert thinking_update["value"] is False
+    assert effort_update["value"] == "low"
+
+
+def test_load_history_item_error_paths_preserve_parameter_controls(monkeypatch, tmp_path):
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+    monkeypatch.setattr(app, "get_soundfont_choices", lambda: [])
+    monkeypatch.setattr(app, "get_default_soundfont", lambda: None)
+    monkeypatch.setattr(app, "is_playback_available", lambda soundfont_name=None: (False, None))
+
+    monkeypatch.setattr(app, "get_generation", lambda gen_id: None)
+    no_selection = app.load_history_item(None)
+    not_found = app.load_history_item("missing")
+
+    monkeypatch.setattr(
+        app,
+        "get_generation",
+        lambda gen_id: SimpleNamespace(
+            midi_path=str(tmp_path / "missing.mid"),
+            soundfont=None,
+        ),
+    )
+    missing_midi = app.load_history_item("missing-midi")
+
+    for result in (no_selection, not_found, missing_midi):
+        assert len(result) == 17
+        assert result[-8:] == ({}, {}, {}, {}, {}, {}, {}, {})
 
 
 def test_refresh_soundfont_controls_updates_dropdown_choices(monkeypatch):
@@ -523,6 +739,49 @@ def test_history_toggle_resizes_piano_roll_after_sidebar_update():
     assert piano_roll["type"] == "plot"
     assert resize_dependency["trigger_after"] == toggle_dependency["id"]
     assert resize_dependency["queue"] is False
+
+
+def test_history_load_callback_updates_all_parameter_controls_once():
+    demo = app.create_demo(playback_status=(True, None))
+    dependency = next(
+        dependency
+        for dependency in demo.config["dependencies"]
+        if dependency["api_name"] == "load_history_item"
+    )
+    components_by_id = {component["id"]: component for component in demo.config["components"]}
+    restored_labels = [
+        components_by_id[component_id]["props"].get("label")
+        for component_id in dependency["outputs"][-8:]
+    ]
+
+    assert restored_labels == [
+        "Key",
+        "Scale",
+        "Description",
+        "Provider",
+        "Model",
+        "Temperature",
+        "Reasoning",
+        "Reasoning Effort",
+    ]
+    assert len(dependency["outputs"]) == len(set(dependency["outputs"]))
+
+
+def test_model_sync_callbacks_only_run_for_user_input():
+    demo = app.create_demo(playback_status=(True, None))
+    sync_api_names = {
+        "sync_controls_for_provider",
+        "sync_controls_for_model",
+        "sync_controls_for_thinking",
+    }
+    sync_dependencies = [
+        dependency
+        for dependency in demo.config["dependencies"]
+        if dependency["api_name"] in sync_api_names
+    ]
+
+    assert {dependency["api_name"] for dependency in sync_dependencies} == sync_api_names
+    assert all(dependency["targets"][0][1] == "input" for dependency in sync_dependencies)
 
 
 def test_main_allows_gradio_to_serve_generation_history(monkeypatch, tmp_path):

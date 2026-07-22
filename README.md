@@ -4,6 +4,8 @@
 the reusable engine into a browser-based workflow for generating, auditioning,
 visualizing, editing, and revisiting four-bar MIDI loops.
 
+![conductor-main - Screenshot](assets/conductor-main-screenshot.png)
+
 The app owns UI layout, callback adaptation, UI state, prompt editing, and its
 Plotly piano roll. Core owns provider routing, generation, MIDI conversion,
 audio helpers, and persisted artifacts. This separation allows another UI or
@@ -76,8 +78,7 @@ A useful description is specific without trying to reproduce the entire system
 prompt. For example:
 
 ```text
-warm neo-soul electric piano chords with syncopated upper extensions and a
-simple bass movement
+warm neo-soul electric piano chords with syncopated upper extensions and a simple bass movement
 ```
 
 The selected key and scale are added to the request automatically.

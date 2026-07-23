@@ -70,7 +70,7 @@ The completed view provides:
 - **Download Generated MIDI** for importing the loop into a DAW;
 - **Playback** when audio rendering succeeds;
 - **MIDI Visualization**, an interactive four-bar piano roll;
-- **Error Message** for provider, parsing, rendering, or configuration errors.
+- **Status** for concise provider, parsing, rendering, or configuration issues.
 
 A useful description is specific without trying to reproduce the entire system
 prompt. For example:
@@ -165,7 +165,7 @@ Click **History** to open the recent-generation sidebar. From there you can:
 - select and **Load** a previous generation;
 - **Delete** a generation and its saved files;
 - **Refresh** the list after external changes;
-- inspect prompt, model, musical settings, time, and cost summaries.
+- inspect prompt, model, reasoning settings, musical settings, time, and cost summaries.
 
 By default, the app keeps the newest 20 generations under its data directory:
 

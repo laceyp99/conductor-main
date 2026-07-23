@@ -318,7 +318,7 @@ def test_history_controls_use_defaults_and_warn_for_legacy_reasoning(monkeypatch
 
     assert updates.use_thinking == {"visible": True, "value": False}
     assert updates.effort == {"choices": ["low"], "value": "low", "visible": False}
-    assert "were not recorded" in updates.warnings[0]
+    assert updates.warnings == ("Reasoning settings weren't saved; defaults applied.",)
 
 
 def test_history_controls_preserve_unavailable_provider_and_model_without_discovery(monkeypatch):
@@ -355,10 +355,7 @@ def test_history_controls_preserve_unavailable_provider_and_model_without_discov
     assert updates.model["value"] == "retired-local-model"
     assert updates.use_thinking["value"] is True
     assert updates.effort["value"] == "medium"
-    assert any("Saved provider Ollama is unavailable" in warning for warning in updates.warnings)
-    assert any(
-        "Saved model retired-local-model is unavailable" in warning for warning in updates.warnings
-    )
+    assert updates.warnings == ("Unavailable selection: Ollama / retired-local-model.",)
 
 
 def test_history_store_uses_the_app_retention_policy():
@@ -490,7 +487,7 @@ def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tm
     assert loaded_audio_path == str(audio_path)
     assert dropdown_update["value"] == "FM-Piano1 20190916.sf2"
     assert visualization == "viz"
-    assert error_message == "Previously used SoundFont: missing.sf2 (missing)."
+    assert error_message == "Missing SoundFont: missing.sf2."
     assert generation_id == "gen_1"
     assert saved_soundfont == "missing.sf2"
     assert current_audio_path == str(audio_path)
@@ -680,6 +677,81 @@ def test_render_history_html_displays_missing_cost_as_na(monkeypatch):
     assert "Cost: N/A" in html
 
 
+def test_render_history_html_pairs_model_with_reasoning_details(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_model_info",
+        lambda: {
+            "models": {
+                "OpenAI": {
+                    "effort-model": {
+                        "extended_thinking": True,
+                        "effort_options": ["low", "medium", "high", "xhigh"],
+                    }
+                },
+                "Anthropic": {
+                    "toggle-model": {
+                        "extended_thinking": True,
+                        "effort_options": [],
+                    }
+                },
+            }
+        },
+    )
+    history_defaults = {
+        "timestamp": __import__("datetime").datetime(2026, 1, 1, 12, 0),
+        "prompt": "history reasoning",
+        "key": "C",
+        "scale": "Major",
+        "cost": None,
+    }
+    monkeypatch.setattr(
+        app,
+        "load_history",
+        lambda: [
+            SimpleNamespace(
+                **history_defaults,
+                id="effort",
+                provider="OpenAI",
+                model="effort-model",
+                use_thinking=False,
+                effort="xhigh",
+            ),
+            SimpleNamespace(
+                **history_defaults,
+                id="toggle",
+                provider="Anthropic",
+                model="toggle-model",
+                use_thinking=True,
+                effort="low",
+            ),
+            SimpleNamespace(
+                **history_defaults,
+                id="legacy",
+                provider="OpenAI",
+                model="legacy-model",
+                use_thinking=None,
+                effort=None,
+            ),
+            SimpleNamespace(
+                **history_defaults,
+                id="toggle-off",
+                provider="Anthropic",
+                model="toggle-off-model",
+                use_thinking=False,
+                effort="low",
+            ),
+        ],
+    )
+
+    rendered_history = app.render_history_html()
+
+    assert "effort-model (xhigh)" in rendered_history
+    assert "toggle-model (reasoning)" in rendered_history
+    assert "legacy-model (" not in rendered_history
+    assert "toggle-off-model (" not in rendered_history
+
+
 def test_render_history_html_escapes_persisted_metadata(monkeypatch):
     monkeypatch.setattr(
         app,
@@ -692,9 +764,26 @@ def test_render_history_html_escapes_persisted_metadata(monkeypatch):
                 key="<b>C</b>",
                 scale="<i>Major</i>",
                 model="<em>model</em>",
+                provider="OpenAI",
+                use_thinking=False,
+                effort="<script>effort</script>",
                 cost=0,
             )
         ],
+    )
+    monkeypatch.setattr(
+        app,
+        "get_model_info",
+        lambda: {
+            "models": {
+                "OpenAI": {
+                    "<em>model</em>": {
+                        "extended_thinking": True,
+                        "effort_options": ["<script>effort</script>"],
+                    }
+                }
+            }
+        },
     )
 
     rendered_history = app.render_history_html()
@@ -703,8 +792,10 @@ def test_render_history_html_escapes_persisted_metadata(monkeypatch):
     assert "&lt;b&gt;C&lt;/b&gt; &lt;i&gt;Major&lt;/i&gt;" in rendered_history
     assert "&lt;img src=x onerror=alert(1)&gt;" in rendered_history
     assert "&lt;em&gt;model&lt;/em&gt;" in rendered_history
+    assert "&lt;script&gt;effort&lt;/script&gt;" in rendered_history
     assert "<script>alert(1)</script>" not in rendered_history
     assert "<img src=x onerror=alert(1)>" not in rendered_history
+    assert "<script>effort</script>" not in rendered_history
 
 
 def test_refresh_soundfont_controls_stays_disabled_after_active_delete(monkeypatch):

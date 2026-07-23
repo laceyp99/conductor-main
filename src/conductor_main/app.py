@@ -211,9 +211,6 @@ def get_history_control_updates(gen):
     provider_is_available = provider in known_models
     if not provider_is_available:
         provider_choices.append((f"{provider} (unavailable)", provider))
-        warnings.append(
-            f"Saved provider {provider} is unavailable; select an available provider to regenerate."
-        )
 
     if provider_is_available:
         provider_models = known_models[provider]
@@ -227,9 +224,7 @@ def get_history_control_updates(gen):
 
     if not model_is_available:
         model_choices.append((f"{model} (unavailable)", model))
-        warnings.append(
-            f"Saved model {model} is unavailable; select an available model to regenerate."
-        )
+        warnings.append(f"Unavailable selection: {provider} / {model}.")
 
     saved_thinking = getattr(gen, "use_thinking", None)
     saved_effort = getattr(gen, "effort", None)
@@ -249,10 +244,7 @@ def get_history_control_updates(gen):
         }
 
     if not reasoning_was_recorded:
-        warnings.append(
-            "Reasoning settings were not recorded for this older generation; "
-            "current model defaults were applied."
-        )
+        warnings.append("Reasoning settings weren't saved; defaults applied.")
 
     thinking_value = saved_thinking if reasoning_was_recorded else settings["thinking_value"]
     effort_value = saved_effort if reasoning_was_recorded else settings["effort_value"]
@@ -744,6 +736,33 @@ def toggle_history_sidebar(is_visible):
     )
 
 
+def format_history_reasoning(gen, model_info):
+    """Format persisted reasoning metadata for a history card."""
+    use_thinking = getattr(gen, "use_thinking", None)
+    effort = getattr(gen, "effort", None)
+    if use_thinking is None or effort is None:
+        return ""
+
+    provider = getattr(gen, "provider", None)
+    model_config = model_info["models"].get(provider, {}).get(gen.model, {})
+    effort_options = model_config.get("effort_options", [])
+    supports_toggle_reasoning = (
+        provider in {"Anthropic", "Google"}
+        and model_config.get("extended_thinking", False)
+        and not effort_options
+    )
+
+    if effort_options:
+        return effort
+    if supports_toggle_reasoning:
+        return "reasoning" if use_thinking else ""
+    if use_thinking:
+        return "reasoning"
+    if effort != "low":
+        return effort
+    return ""
+
+
 def render_history_html():
     """Render the history items as HTML.
 
@@ -761,6 +780,7 @@ def render_history_html():
         """
 
     html_parts = []
+    model_info = get_model_info()
     for gen in history:
         timestamp_str = gen.timestamp.strftime("%b %d, %I:%M %p")
         cost_str = f"${gen.cost:.4f}" if gen.cost is not None else "N/A"
@@ -770,6 +790,8 @@ def render_history_html():
         scale = html.escape(str(gen.scale), quote=True)
         prompt_preview = html.escape(prompt_preview, quote=True)
         model = html.escape(str(gen.model), quote=True)
+        reasoning = html.escape(format_history_reasoning(gen, model_info), quote=True)
+        reasoning_suffix = f" ({reasoning})" if reasoning else ""
 
         html_parts.append(f"""
         <div class="history-item" data-id="{generation_id}" style="
@@ -786,7 +808,7 @@ def render_history_html():
                 "{prompt_preview}"
             </div>
             <div style="font-size: 0.8em; color: #888; display: flex; justify-content: space-between;">
-                <span>{model}</span>
+                <span>{model}{reasoning_suffix}</span>
                 <span>{timestamp_str}</span>
             </div>
             <div style="font-size: 0.75em; color: #666; margin-top: 4px;">
@@ -875,7 +897,7 @@ def load_history_item(gen_id):
     if gen.soundfont:
         saved_soundfont_name = os.path.basename(gen.soundfont)
         if saved_soundfont_name not in get_soundfont_choices():
-            warnings.append(f"Previously used SoundFont: {saved_soundfont_name} (missing).")
+            warnings.append(f"Missing SoundFont: {saved_soundfont_name}.")
 
     control_updates = get_history_control_updates(gen)
     warnings.extend(control_updates.warnings)
@@ -1135,7 +1157,7 @@ def create_demo(playback_status=None):
                             )
 
                     vis_output = gr.Plot(label="MIDI Visualization", elem_id="piano-roll")
-                    error_message = gr.Textbox(label="Error Message", interactive=False)
+                    error_message = gr.Textbox(label="Status", interactive=False)
 
                     # Update model choices when provider changes
                     provider_input.input(

@@ -72,7 +72,7 @@ The completed view provides:
 - **Download Generated MIDI** for importing the loop into a DAW;
 - **Playback** when audio rendering succeeds;
 - **MIDI Visualization**, an interactive four-bar piano roll;
-- **Error Message** for provider, parsing, rendering, or configuration errors.
+- **Status** for concise provider, parsing, rendering, or configuration issues.
 
 A useful description is specific without trying to reproduce the entire system
 prompt. For example:
@@ -166,7 +166,7 @@ Click **History** to open the recent-generation sidebar. From there you can:
 - select and **Load** a previous generation;
 - **Delete** a generation and its saved files;
 - **Refresh** the list after external changes;
-- inspect prompt, model, musical settings, time, and cost summaries.
+- inspect prompt, model, reasoning settings, musical settings, time, and cost summaries.
 
 By default, the app keeps the newest 20 generations under its data directory:
 
@@ -180,8 +180,15 @@ By default, the app keeps the newest 20 generations under its data directory:
 ```
 
 Loading history restores its MIDI, saved audio, visualization, generation ID,
-and SoundFont metadata. If the previously used SoundFont is missing, the app
-keeps the saved audio available and identifies the missing selection.
+SoundFont metadata, loop parameters, provider, model, temperature, and reasoning
+controls. The restored controls remain editable, so a historical setup can be
+adjusted before generating again.
+
+Older history entries that did not record reasoning settings use the current
+model defaults and show a warning. Saved providers or models that are no longer
+available remain visible with an unavailable label instead of being silently
+replaced. Missing SoundFonts are also identified while saved audio remains
+available.
 
 ## Prompt Editor
 

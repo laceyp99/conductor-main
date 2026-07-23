@@ -12,6 +12,7 @@ import html
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from queue import Empty, Queue
@@ -168,6 +169,110 @@ def get_model_dropdown_choices(provider):
     """Get dropdown choices as (label, value) tuples for a provider."""
     models = get_models_for_provider(provider)
     return [(format_model_label(provider, model_name), model_name) for model_name in models]
+
+
+@dataclass(frozen=True)
+class HistoryControlUpdates:
+    """Coherent form updates derived from one saved generation."""
+
+    key: object
+    scale: object
+    description: object
+    provider: object
+    model: object
+    temperature: object
+    use_thinking: object
+    effort: object
+    warnings: tuple[str, ...]
+
+    def as_tuple(self):
+        """Return updates in the order used by the history-load callback."""
+        return (
+            self.key,
+            self.scale,
+            self.description,
+            self.provider,
+            self.model,
+            self.temperature,
+            self.use_thinking,
+            self.effort,
+        )
+
+
+def get_history_control_updates(gen):
+    """Build form updates without provider discovery or live service calls."""
+    model_info = get_model_info()
+    known_models = model_info["models"]
+    provider = gen.provider
+    model = gen.model
+    warnings = []
+
+    provider_choices = list(known_models)
+    provider_is_available = provider in known_models
+    if not provider_is_available:
+        provider_choices.append((f"{provider} (unavailable)", provider))
+
+    if provider_is_available:
+        provider_models = known_models[provider]
+        model_choices = [
+            (format_model_label(provider, model_name), model_name) for model_name in provider_models
+        ]
+        model_is_available = model in provider_models
+    else:
+        model_choices = []
+        model_is_available = False
+
+    if not model_is_available:
+        model_choices.append((f"{model} (unavailable)", model))
+        warnings.append(f"Unavailable selection: {provider} / {model}.")
+
+    saved_thinking = getattr(gen, "use_thinking", None)
+    saved_effort = getattr(gen, "effort", None)
+    reasoning_was_recorded = saved_thinking is not None and saved_effort is not None
+
+    if model_is_available:
+        settings = get_model_settings(provider, model, bool(saved_thinking))
+    else:
+        settings = {
+            "show_temperature": True,
+            "temperature_value": gen.temperature,
+            "show_thinking": True,
+            "thinking_value": False,
+            "effort_options": [],
+            "effort_value": "low",
+            "show_effort": True,
+        }
+
+    if not reasoning_was_recorded:
+        warnings.append("Reasoning settings weren't saved; defaults applied.")
+
+    thinking_value = saved_thinking if reasoning_was_recorded else settings["thinking_value"]
+    effort_value = saved_effort if reasoning_was_recorded else settings["effort_value"]
+    effort_options = list(settings["effort_options"])
+    if effort_value not in effort_options:
+        effort_options.append(effort_value)
+
+    return HistoryControlUpdates(
+        key=gr.update(value=gen.key),
+        scale=gr.update(value=gen.scale),
+        description=gr.update(value=gen.prompt),
+        provider=gr.update(choices=provider_choices, value=provider),
+        model=gr.update(choices=model_choices, value=model),
+        temperature=gr.update(
+            visible=settings["show_temperature"],
+            value=gen.temperature,
+        ),
+        use_thinking=gr.update(
+            visible=settings["show_thinking"],
+            value=thinking_value,
+        ),
+        effort=gr.update(
+            choices=effort_options or None,
+            value=effort_value,
+            visible=settings["show_effort"],
+        ),
+        warnings=tuple(warnings),
+    )
 
 
 def get_providers():
@@ -631,6 +736,33 @@ def toggle_history_sidebar(is_visible):
     )
 
 
+def format_history_reasoning(gen, model_info):
+    """Format persisted reasoning metadata for a history card."""
+    use_thinking = getattr(gen, "use_thinking", None)
+    effort = getattr(gen, "effort", None)
+    if use_thinking is None or effort is None:
+        return ""
+
+    provider = getattr(gen, "provider", None)
+    model_config = model_info["models"].get(provider, {}).get(gen.model, {})
+    effort_options = model_config.get("effort_options", [])
+    supports_toggle_reasoning = (
+        provider in {"Anthropic", "Google"}
+        and model_config.get("extended_thinking", False)
+        and not effort_options
+    )
+
+    if effort_options:
+        return effort
+    if supports_toggle_reasoning:
+        return "reasoning" if use_thinking else ""
+    if use_thinking:
+        return "reasoning"
+    if effort != "low":
+        return effort
+    return ""
+
+
 def render_history_html():
     """Render the history items as HTML.
 
@@ -648,6 +780,7 @@ def render_history_html():
         """
 
     html_parts = []
+    model_info = get_model_info()
     for gen in history:
         timestamp_str = gen.timestamp.strftime("%b %d, %I:%M %p")
         cost_str = f"${gen.cost:.4f}" if gen.cost is not None else "N/A"
@@ -657,6 +790,8 @@ def render_history_html():
         scale = html.escape(str(gen.scale), quote=True)
         prompt_preview = html.escape(prompt_preview, quote=True)
         model = html.escape(str(gen.model), quote=True)
+        reasoning = html.escape(format_history_reasoning(gen, model_info), quote=True)
+        reasoning_suffix = f" ({reasoning})" if reasoning else ""
 
         html_parts.append(f"""
         <div class="history-item" data-id="{generation_id}" style="
@@ -673,7 +808,7 @@ def render_history_html():
                 "{prompt_preview}"
             </div>
             <div style="font-size: 0.8em; color: #888; display: flex; justify-content: space-between;">
-                <span>{model}</span>
+                <span>{model}{reasoning_suffix}</span>
                 <span>{timestamp_str}</span>
             </div>
             <div style="font-size: 0.75em; color: #666; margin-top: 4px;">
@@ -708,9 +843,12 @@ def load_history_item(gen_id):
         gen_id (str): The generation ID to load.
 
     Returns:
-        tuple: (midi_path, audio_path, soundfont_update, visualization, error_message,
-               generation_id, saved_soundfont, current_audio_path, rerender_update)
+        tuple: (midi_path, audio_path, soundfont_update, visualization, status_message,
+               generation_id, saved_soundfont, current_audio_path, rerender_update,
+               key_update, scale_update, description_update, provider_update, model_update,
+               temperature_update, thinking_update, effort_update)
     """
+    unchanged_controls = tuple(gr.update() for _ in range(8))
     if not gen_id:
         return (
             None,
@@ -722,6 +860,7 @@ def load_history_item(gen_id):
             None,
             None,
             get_rerender_button_update(),
+            *unchanged_controls,
         )
 
     gen = get_generation(gen_id)
@@ -736,6 +875,7 @@ def load_history_item(gen_id):
             None,
             None,
             get_rerender_button_update(),
+            *unchanged_controls,
         )
 
     # Check if files exist
@@ -750,15 +890,17 @@ def load_history_item(gen_id):
             None,
             None,
             get_rerender_button_update(gen.soundfont, None),
+            *unchanged_controls,
         )
 
-    missing_soundfont_message = ""
+    warnings = []
     if gen.soundfont:
         saved_soundfont_name = os.path.basename(gen.soundfont)
         if saved_soundfont_name not in get_soundfont_choices():
-            missing_soundfont_message = (
-                f"Previously used SoundFont: {saved_soundfont_name} (missing)"
-            )
+            warnings.append(f"Missing SoundFont: {saved_soundfont_name}.")
+
+    control_updates = get_history_control_updates(gen)
+    warnings.extend(control_updates.warnings)
 
     # Load visualization
     try:
@@ -775,11 +917,12 @@ def load_history_item(gen_id):
         audio_path,
         get_soundfont_dropdown_update(gen.soundfont),
         visualization,
-        missing_soundfont_message,
+        " ".join(warnings),
         gen.id,
         gen.soundfont,
         audio_path,
         get_rerender_button_update(gen.soundfont, gen.midi_path),
+        *control_updates.as_tuple(),
     )
 
 
@@ -1014,10 +1157,10 @@ def create_demo(playback_status=None):
                             )
 
                     vis_output = gr.Plot(label="MIDI Visualization", elem_id="piano-roll")
-                    error_message = gr.Textbox(label="Error Message", interactive=False)
+                    error_message = gr.Textbox(label="Status", interactive=False)
 
                     # Update model choices when provider changes
-                    provider_input.change(
+                    provider_input.input(
                         sync_controls_for_provider,
                         inputs=provider_input,
                         outputs=[
@@ -1027,7 +1170,7 @@ def create_demo(playback_status=None):
                             effort_input,
                         ],
                     )
-                    model_choice_input.change(
+                    model_choice_input.input(
                         sync_controls_for_model,
                         inputs=[provider_input, model_choice_input],
                         outputs=[
@@ -1037,7 +1180,7 @@ def create_demo(playback_status=None):
                             effort_input,
                         ],
                     )
-                    thinking_checkbox.change(
+                    thinking_checkbox.input(
                         sync_controls_for_thinking,
                         inputs=[provider_input, model_choice_input, thinking_checkbox],
                         outputs=[
@@ -1203,6 +1346,14 @@ def create_demo(playback_status=None):
                 current_saved_soundfont,
                 current_audio_path,
                 rerender_button,
+                key_input,
+                mode_input,
+                description_input,
+                provider_input,
+                model_choice_input,
+                temp_input,
+                thinking_checkbox,
+                effort_input,
             ],
         )
 

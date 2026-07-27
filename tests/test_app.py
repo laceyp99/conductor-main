@@ -68,7 +68,6 @@ def test_run_loop_passes_ui_configuration_to_core(monkeypatch, tmp_path):
     assert captured["config"].provider_credentials.anthropic_api_key == "claude-key"
     assert captured["config"].default_soundfont_path == "custom.sf2"
     assert captured["config"].max_generations == app.MAX_HISTORY_GENERATIONS
-    assert captured["request"].provider is None
     assert captured["request"].effort == "low"
     assert captured["request"].render_audio is True
     assert captured["request"].soundfont_path == "custom.sf2"

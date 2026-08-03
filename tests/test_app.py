@@ -12,6 +12,19 @@ def _write_binary_file(path: Path, content: bytes = b"data") -> Path:
     return path
 
 
+def test_normalize_key_for_core_defaults_combined_black_keys_to_sharps():
+    expected_keys = {
+        "C#/Db": "C#",
+        "D#/Eb": "D#",
+        "F#/Gb": "F#",
+        "G#/Ab": "G#",
+        "A#/Bb": "A#",
+        "C": "C",
+    }
+
+    assert {key: app.normalize_key_for_core(key) for key in expected_keys} == expected_keys
+
+
 def test_run_loop_passes_ui_configuration_to_core(monkeypatch, tmp_path):
     captured = {}
     midi_path = tmp_path / "loop.mid"
@@ -44,7 +57,7 @@ def test_run_loop_passes_ui_configuration_to_core(monkeypatch, tmp_path):
 
     outputs = list(
         app.run_loop(
-            key="C",
+            key="F#/Gb",
             scale="Major",
             description="warm rhodes loop",
             temp=0.3,
@@ -72,6 +85,7 @@ def test_run_loop_passes_ui_configuration_to_core(monkeypatch, tmp_path):
     assert captured["request"].render_audio is True
     assert captured["request"].soundfont_path == "custom.sf2"
     assert captured["request"].description == "warm rhodes loop"
+    assert captured["request"].key == "F#"
 
 
 def test_run_loop_reports_core_generation_errors(monkeypatch):

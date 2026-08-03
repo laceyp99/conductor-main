@@ -43,6 +43,13 @@ DEFAULT_PROVIDER = "Google"
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 CONDUCTOR_APP_DIRNAME = "main"
 MAX_HISTORY_GENERATIONS = 20
+SHARP_KEY_ALIASES = {
+    "C#/Db": "C#",
+    "D#/Eb": "D#",
+    "F#/Gb": "F#",
+    "G#/Ab": "G#",
+    "A#/Bb": "A#",
+}
 APP_CSS = """
 .center-title { text-align: center; font-size: 3em; }
 .app-header {
@@ -108,6 +115,11 @@ HISTORY_STORE = FilesystemArtifactStore(
 
 def load_history():
     return HISTORY_STORE.load_history()
+
+
+def normalize_key_for_core(key):
+    """Translate combined black-key UI labels to Core's sharp spelling."""
+    return SHARP_KEY_ALIASES.get(key, key)
 
 
 def get_generation(gen_id):
@@ -638,7 +650,7 @@ def run_loop(
             )
         )
         request = GenerationRequest(
-            key=key,
+            key=normalize_key_for_core(key),
             scale=scale,
             description=description,
             model=model_choice,

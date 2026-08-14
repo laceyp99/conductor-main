@@ -26,16 +26,17 @@ service to replace Conductor Main without rewriting the engine.
 
 ## Installation
 
-Run these commands from the `conductor-main` project directory. Install a
-compatible published `conductor-core` release first:
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run
+these commands from the `conductor-main` project directory:
 
+```powershell
+uv sync --locked
+uv run --locked conductor-main
 ```
-py -3.12 -m venv .venv
-.\.venv\Scripts\activate
-python -m pip install --upgrade pip
-pip install -e .
-conductor-main
-```
+
+`uv sync` creates the project `.venv` and installs the locked
+`conductor-core` dependency automatically. Activating the environment is not
+required.
 
 The app opens at `http://127.0.0.1:7860/`.
 
@@ -213,19 +214,6 @@ incur cost after the UI stops displaying progress.
 
 ## Common problems
 
-### The app starts but controls fail after recreating a venv
-
-Confirm the launcher and interpreter come from the same environment:
-
-```
-python -c "import sys; print(sys.executable)"
-where.exe conductor-main
-```
-
-Launch `.\.venv\Scripts\conductor-main.exe` explicitly. A globally installed
-launcher can otherwise import a mixed set of dependencies and editable
-packages.
-
 ### A provider is missing or generation reports an API-key error
 
 - Install Core with the relevant provider extra or `providers`.
@@ -244,11 +232,14 @@ re-render the saved MIDI.
 
 ## Development and validation
 
-Install the development extra and run the client tests independently:
+Sync the locked development environment and run the full local validation:
 
-```
-python -m pip install -e ".[dev]"
-python -m pytest -q
+```powershell
+uv sync --locked --extra dev
+uv run --locked --extra dev ruff format --check .
+uv run --locked --extra dev ruff check .
+uv run --locked --extra dev pytest -q
+uv build
 ```
 
 The tests cover callback adaptation, model controls, SoundFont behavior,

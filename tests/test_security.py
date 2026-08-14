@@ -23,7 +23,7 @@ def test_gradio_meets_windows_path_traversal_security_floor():
 )
 def test_root_relative_static_path_cannot_read_windows_files(monkeypatch):
     monkeypatch.setattr(app.ollama_api, "get_ollama_status", lambda: {"available": False})
-    monkeypatch.setattr(app, "load_history", lambda: [])
+    monkeypatch.setattr(app, "load_history", list)
 
     demo = app.create_demo(playback_status=(False, "disabled for security test"))
     server = gr.mount_gradio_app(

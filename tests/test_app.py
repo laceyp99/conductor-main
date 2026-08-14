@@ -517,7 +517,7 @@ def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tm
 
 def test_load_history_item_error_paths_preserve_parameter_controls(monkeypatch, tmp_path):
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
-    monkeypatch.setattr(app, "get_soundfont_choices", lambda: [])
+    monkeypatch.setattr(app, "get_soundfont_choices", list)
     monkeypatch.setattr(app, "get_default_soundfont", lambda: None)
     monkeypatch.setattr(app, "is_playback_available", lambda soundfont_name=None: (False, None))
 

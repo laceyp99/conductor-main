@@ -13,7 +13,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from queue import Empty, Queue
 
@@ -351,11 +351,9 @@ def get_model_settings(provider, model_choice, use_thinking=False):
     show_temperature = True
     temperature_value = 0.1
 
-    if provider == "OpenAI" and model_config.get("extended_thinking", False):
-        show_temperature = False
-        temperature_value = 1.0
-    elif provider in {"Anthropic", "Google"} and (
-        effort_options or (supports_toggle_reasoning and use_thinking)
+    if (provider == "OpenAI" and model_config.get("extended_thinking", False)) or (
+        provider in {"Anthropic", "Google"}
+        and (effort_options or (supports_toggle_reasoning and use_thinking))
     ):
         show_temperature = False
         temperature_value = 1.0
@@ -425,13 +423,13 @@ def get_selected_soundfont(soundfont_choice=None):
         return None
 
     if soundfont_choice:
-        requested_name = os.path.basename(soundfont_choice)
+        requested_name = Path(soundfont_choice).name
         if requested_name in soundfonts:
             return requested_name
 
     default_soundfont = get_default_soundfont()
     if default_soundfont:
-        default_soundfont_name = os.path.basename(default_soundfont)
+        default_soundfont_name = Path(default_soundfont).name
         if default_soundfont_name in soundfonts:
             return default_soundfont_name
 
@@ -448,7 +446,7 @@ def get_soundfont_dropdown_update(soundfont_choice=None):
 
 def has_active_rerender_target(midi_path):
     """Return whether the UI currently has a MIDI file available to rerender."""
-    return bool(midi_path and os.path.exists(midi_path))
+    return bool(midi_path and Path(midi_path).exists())
 
 
 def rerender_available(soundfont_choice=None, midi_path=None):
@@ -503,7 +501,7 @@ def rerender_current_audio(
             current_audio_path,
         )
 
-    if not os.path.exists(midi_path):
+    if not Path(midi_path).exists():
         return (
             current_audio_path,
             f"MIDI file not found: {midi_path}",
@@ -523,7 +521,7 @@ def rerender_current_audio(
     if (
         saved_soundfont == selected_soundfont
         and current_audio_path
-        and os.path.exists(current_audio_path)
+        and Path(current_audio_path).exists()
     ):
         return (
             current_audio_path,
@@ -532,7 +530,7 @@ def rerender_current_audio(
             current_audio_path,
         )
 
-    output_path = current_audio_path or f"{os.path.splitext(midi_path)[0]}.mp3"
+    output_path = current_audio_path or str(Path(midi_path).with_suffix(".mp3"))
     rendered_audio_path = midi_to_mp3(
         midi_path,
         output_path=output_path,
@@ -591,7 +589,9 @@ def save_prompts(loop_gen_text):
     with PROMPT_OVERRIDE_PATH.open("w", encoding="utf-8") as f:
         f.write(loop_gen_text)
     return (
-        "Prompts saved successfully at " + datetime.now().strftime("%I:%M:%S %p on %B %d, %Y") + "."
+        "Prompts saved successfully at "
+        + datetime.now(timezone.utc).astimezone().strftime("%I:%M:%S %p on %B %d, %Y")
+        + "."
     )
 
 
@@ -891,7 +891,7 @@ def load_history_item(gen_id):
         )
 
     # Check if files exist
-    if not os.path.exists(gen.midi_path):
+    if not Path(gen.midi_path).exists():
         return (
             None,
             None,
@@ -907,7 +907,7 @@ def load_history_item(gen_id):
 
     warnings = []
     if gen.soundfont:
-        saved_soundfont_name = os.path.basename(gen.soundfont)
+        saved_soundfont_name = Path(gen.soundfont).name
         if saved_soundfont_name not in get_soundfont_choices():
             warnings.append(f"Missing SoundFont: {saved_soundfont_name}.")
 
@@ -922,7 +922,7 @@ def load_history_item(gen_id):
         visualization = None
 
     # Get audio path if it exists
-    audio_path = gen.audio_path if gen.audio_path and os.path.exists(gen.audio_path) else None
+    audio_path = gen.audio_path if gen.audio_path and Path(gen.audio_path).exists() else None
 
     return (
         gen.midi_path,
@@ -989,19 +989,18 @@ def delete_history_item(
                 None if deleted_active_generation else midi_path,
             ),
         )
-    else:
-        return (
-            gr.update(choices=choices, value=None),
-            "Failed to delete generation",
-            render_history_html(),
-            gr.update(),
-            gr.update(),
-            gr.update(),
-            current_generation_id,
-            current_saved_soundfont,
-            current_audio_path,
-            get_rerender_button_update(soundfont_choice, midi_path),
-        )
+    return (
+        gr.update(choices=choices, value=None),
+        "Failed to delete generation",
+        render_history_html(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        current_generation_id,
+        current_saved_soundfont,
+        current_audio_path,
+        get_rerender_button_update(soundfont_choice, midi_path),
+    )
 
 
 def refresh_history():
@@ -1036,7 +1035,7 @@ def create_demo(playback_status=None):
     if playback_status is None:
         playback_status = is_playback_available(default_soundfont)
 
-    playback_available, playback_error = playback_status
+    playback_available, _playback_error = playback_status
 
     with gr.Blocks() as demo:
         # State for sidebar visibility
@@ -1061,17 +1060,16 @@ def create_demo(playback_status=None):
                 # Text to MIDI Tab for generating loops based on user input
                 with gr.Tab(label="Text to MIDI"):
                     gr.Markdown("Generate a loop based on your description.")
-                    with gr.Row():
-                        with gr.Accordion("API Keys", open=False):
-                            openai_key_input = gr.Textbox(
-                                lines=1, type="password", label="OpenAI API Key", value=""
-                            )
-                            gemini_key_input = gr.Textbox(
-                                lines=1, type="password", label="Gemini API Key", value=""
-                            )
-                            claude_key_input = gr.Textbox(
-                                lines=1, type="password", label="Claude API Key", value=""
-                            )
+                    with gr.Row(), gr.Accordion("API Keys", open=False):
+                        openai_key_input = gr.Textbox(
+                            lines=1, type="password", label="OpenAI API Key", value=""
+                        )
+                        gemini_key_input = gr.Textbox(
+                            lines=1, type="password", label="Gemini API Key", value=""
+                        )
+                        claude_key_input = gr.Textbox(
+                            lines=1, type="password", label="Claude API Key", value=""
+                        )
                     with gr.Row():
                         with gr.Column():
                             gr.Markdown("## Loop Parameters")
@@ -1140,19 +1138,18 @@ def create_demo(playback_status=None):
                         )
 
                     # Output section
-                    with gr.Row():
-                        with gr.Column():
-                            prog_output = gr.File(label="Download Generated MIDI")
-                            # Audio playback component
-                            audio_output = gr.Audio(
-                                label="Playback", type="filepath", interactive=False
+                    with gr.Row(), gr.Column():
+                        prog_output = gr.File(label="Download Generated MIDI")
+                        # Audio playback component
+                        audio_output = gr.Audio(
+                            label="Playback", type="filepath", interactive=False
+                        )
+                        # Show playback status if not available
+                        if not playback_available:
+                            gr.Markdown(
+                                f"*{get_soundfont_status_message(default_soundfont)}*",
+                                elem_classes=["warning-text"],
                             )
-                            # Show playback status if not available
-                            if not playback_available:
-                                gr.Markdown(
-                                    f"*{get_soundfont_status_message(default_soundfont)}*",
-                                    elem_classes=["warning-text"],
-                                )
 
                     with gr.Row(equal_height=False):
                         soundfont_input = gr.Dropdown(

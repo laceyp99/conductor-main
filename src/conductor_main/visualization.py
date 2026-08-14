@@ -49,10 +49,11 @@ def visualize_midi_plotly(input_midi):
         elapsed += message.time
         if message.type == "note_on" and message.velocity > 0:
             active.setdefault(message.note, []).append((elapsed, message.velocity))
-        elif message.type == "note_off" or (message.type == "note_on" and message.velocity == 0):
-            if active.get(message.note):
-                start, velocity = active[message.note].pop(0)
-                notes.append((message.note, start, elapsed, velocity))
+        elif (
+            message.type == "note_off" or (message.type == "note_on" and message.velocity == 0)
+        ) and active.get(message.note):
+            start, velocity = active[message.note].pop(0)
+            notes.append((message.note, start, elapsed, velocity))
 
     sixteenth_notes = [
         (pitch, start / midi.ticks_per_beat * 4, end / midi.ticks_per_beat * 4, velocity)
@@ -78,7 +79,7 @@ def visualize_midi_plotly(input_midi):
                 y0=pitch - 0.5,
                 y1=pitch + 0.5,
                 fillcolor=BLACK_KEY_BACKGROUND,
-                line=dict(width=0),
+                line={"width": 0},
                 layer="below",
             )
     for beat in range(1, 16):
@@ -90,7 +91,7 @@ def visualize_midi_plotly(input_midi):
                 x1=position,
                 y0=minimum - 0.5,
                 y1=maximum + 0.5,
-                line=dict(color=GRID, width=1),
+                line={"color": GRID, "width": 1},
                 layer="below",
             )
     for bar in range(5):
@@ -101,7 +102,7 @@ def visualize_midi_plotly(input_midi):
             x1=position,
             y0=minimum - 0.5,
             y1=maximum + 0.5,
-            line=dict(color=BAR_GRID, width=2),
+            line={"color": BAR_GRID, "width": 2},
             layer="below",
         )
     for bar in range(1, 5):
@@ -110,7 +111,7 @@ def visualize_midi_plotly(input_midi):
             y=maximum + 1,
             text=f"Bar {bar}",
             showarrow=False,
-            font=dict(color=TEXT, size=12),
+            font={"color": TEXT, "size": 12},
             yanchor="bottom",
         )
 
@@ -123,7 +124,7 @@ def visualize_midi_plotly(input_midi):
             y0=pitch - 0.4,
             y1=pitch + 0.4,
             fillcolor=_velocity_color(velocity),
-            line=dict(color="rgba(255,255,255,0.3)", width=1),
+            line={"color": "rgba(255,255,255,0.3)", "width": 1},
             layer="above",
         )
         bar = int(start // 16) + 1
@@ -143,10 +144,10 @@ def visualize_midi_plotly(input_midi):
             x=hover_x,
             y=hover_y,
             mode="markers",
-            marker=dict(size=10, opacity=0),
+            marker={"size": 10, "opacity": 0},
             hoverinfo="text",
             hovertext=hover_text,
-            hoverlabel=dict(bgcolor=GRID, font_size=12, font_color=TEXT),
+            hoverlabel={"bgcolor": GRID, "font_size": 12, "font_color": TEXT},
         )
     )
     ticks = list(range(minimum, maximum + 1))
@@ -154,29 +155,29 @@ def visualize_midi_plotly(input_midi):
     figure.update_layout(
         plot_bgcolor=BACKGROUND,
         paper_bgcolor=BACKGROUND,
-        xaxis=dict(
-            range=[0, 64],
-            showgrid=False,
-            zeroline=False,
-            tickmode="array",
-            tickvals=[0, 16, 32, 48, 64],
-            ticktext=["", "", "", "", ""],
-            fixedrange=False,
-        ),
-        yaxis=dict(
-            range=[minimum - 0.5, maximum + 1.5],
-            showgrid=False,
-            zeroline=False,
-            tickmode="array",
-            tickvals=ticks,
-            ticktext=labels,
-            tickfont=dict(color=TEXT, size=10),
-        ),
+        xaxis={
+            "range": [0, 64],
+            "showgrid": False,
+            "zeroline": False,
+            "tickmode": "array",
+            "tickvals": [0, 16, 32, 48, 64],
+            "ticktext": ["", "", "", "", ""],
+            "fixedrange": False,
+        },
+        yaxis={
+            "range": [minimum - 0.5, maximum + 1.5],
+            "showgrid": False,
+            "zeroline": False,
+            "tickmode": "array",
+            "tickvals": ticks,
+            "ticktext": labels,
+            "tickfont": {"color": TEXT, "size": 10},
+        },
         showlegend=False,
-        margin=dict(l=60, r=20, t=40, b=40),
+        margin={"l": 60, "r": 20, "t": 40, "b": 40},
         height=400,
         hoverdistance=20,
         hovermode="closest",
-        modebar=dict(bgcolor="rgba(0,0,0,0)", color=TEXT, activecolor="#FF6B5B"),
+        modebar={"bgcolor": "rgba(0,0,0,0)", "color": TEXT, "activecolor": "#FF6B5B"},
     )
     return figure

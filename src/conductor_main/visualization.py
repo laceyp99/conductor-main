@@ -50,19 +50,30 @@ def visualize_midi_plotly(input_midi):
         if message.type == "note_on" and message.velocity > 0:
             active.setdefault(message.note, []).append((elapsed, message.velocity))
         elif (
-            message.type == "note_off" or (message.type == "note_on" and message.velocity == 0)
+            message.type == "note_off"
+            or (message.type == "note_on" and message.velocity == 0)
         ) and active.get(message.note):
             start, velocity = active[message.note].pop(0)
             notes.append((message.note, start, elapsed, velocity))
 
     sixteenth_notes = [
-        (pitch, start / midi.ticks_per_beat * 4, end / midi.ticks_per_beat * 4, velocity)
+        (
+            pitch,
+            start / midi.ticks_per_beat * 4,
+            end / midi.ticks_per_beat * 4,
+            velocity,
+        )
         for pitch, start, end, velocity in notes
     ]
     figure = go.Figure()
     if not sixteenth_notes:
         figure.add_annotation(
-            text="No notes found", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False
+            text="No notes found",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
         )
         return figure
 

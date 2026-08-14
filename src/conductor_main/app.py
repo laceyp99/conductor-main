@@ -131,7 +131,9 @@ def delete_generation(gen_id):
 
 
 def update_generation_audio(gen_id, audio_path, soundfont=None):
-    return HISTORY_STORE.update_generation_audio(gen_id, audio_path, soundfont=soundfont)
+    return HISTORY_STORE.update_generation_audio(
+        gen_id, audio_path, soundfont=soundfont
+    )
 
 
 def format_price_summary(price_value):
@@ -180,7 +182,9 @@ def format_model_label(provider, model_name):
 def get_model_dropdown_choices(provider):
     """Get dropdown choices as (label, value) tuples for a provider."""
     models = get_models_for_provider(provider)
-    return [(format_model_label(provider, model_name), model_name) for model_name in models]
+    return [
+        (format_model_label(provider, model_name), model_name) for model_name in models
+    ]
 
 
 @dataclass(frozen=True)
@@ -227,7 +231,8 @@ def get_history_control_updates(gen):
     if provider_is_available:
         provider_models = known_models[provider]
         model_choices = [
-            (format_model_label(provider, model_name), model_name) for model_name in provider_models
+            (format_model_label(provider, model_name), model_name)
+            for model_name in provider_models
         ]
         model_is_available = model in provider_models
     else:
@@ -258,7 +263,9 @@ def get_history_control_updates(gen):
     if not reasoning_was_recorded:
         warnings.append("Reasoning settings weren't saved; defaults applied.")
 
-    thinking_value = saved_thinking if reasoning_was_recorded else settings["thinking_value"]
+    thinking_value = (
+        saved_thinking if reasoning_was_recorded else settings["thinking_value"]
+    )
     effort_value = saved_effort if reasoning_was_recorded else settings["effort_value"]
     effort_options = list(settings["effort_options"])
     if effort_value not in effort_options:
@@ -636,9 +643,15 @@ def run_loop(
     try:
         selected_soundfont = get_selected_soundfont(soundfont_choice)
         credentials = ProviderCredentials(
-            openai_api_key=openai_key.strip() if openai_key and openai_key.strip() else None,
-            google_api_key=gemini_key.strip() if gemini_key and gemini_key.strip() else None,
-            anthropic_api_key=claude_key.strip() if claude_key and claude_key.strip() else None,
+            openai_api_key=openai_key.strip()
+            if openai_key and openai_key.strip()
+            else None,
+            google_api_key=gemini_key.strip()
+            if gemini_key and gemini_key.strip()
+            else None,
+            anthropic_api_key=claude_key.strip()
+            if claude_key and claude_key.strip()
+            else None,
         )
         engine = LoopGenerationEngine(
             EngineConfig.from_defaults(
@@ -666,7 +679,16 @@ def run_loop(
             progress_events.put(event)
 
         # Yield initial status and show the stop-waiting button.
-        yield None, None, None, "Working on it...", gr.update(visible=True), None, None, None
+        yield (
+            None,
+            None,
+            None,
+            "Working on it...",
+            gr.update(visible=True),
+            None,
+            None,
+            None,
+        )
 
         # Run the synchronous Core engine in a background thread so the UI can stop waiting.
         executor = ThreadPoolExecutor(max_workers=1)
@@ -683,7 +705,16 @@ def run_loop(
                     status_message = progress_event.message
                 except Empty:
                     status_message = "Generating MIDI..."
-                yield None, None, None, status_message, gr.update(visible=True), None, None, None
+                yield (
+                    None,
+                    None,
+                    None,
+                    status_message,
+                    gr.update(visible=True),
+                    None,
+                    None,
+                    None,
+                )
 
             while not progress_events.empty():
                 progress_event = progress_events.get()
@@ -922,7 +953,9 @@ def load_history_item(gen_id):
         visualization = None
 
     # Get audio path if it exists
-    audio_path = gen.audio_path if gen.audio_path and Path(gen.audio_path).exists() else None
+    audio_path = (
+        gen.audio_path if gen.audio_path and Path(gen.audio_path).exists() else None
+    )
 
     return (
         gen.midi_path,
@@ -1105,7 +1138,9 @@ def create_demo(playback_status=None):
                                 default_provider, default_model, False
                             )
                             provider_input = gr.Dropdown(
-                                choices=get_providers(), label="Provider", value=default_provider
+                                choices=get_providers(),
+                                label="Provider",
+                                value=default_provider,
                             )
                             model_choice_input = gr.Dropdown(
                                 choices=get_model_dropdown_choices(default_provider),
@@ -1165,7 +1200,9 @@ def create_demo(playback_status=None):
                                 interactive=rerender_available(default_soundfont, None),
                             )
 
-                    vis_output = gr.Plot(label="MIDI Visualization", elem_id="piano-roll")
+                    vis_output = gr.Plot(
+                        label="MIDI Visualization", elem_id="piano-roll"
+                    )
                     error_message = gr.Textbox(label="Status", interactive=False)
 
                     # Update model choices when provider changes

@@ -22,7 +22,9 @@ def test_normalize_key_for_core_defaults_combined_black_keys_to_sharps():
         "C": "C",
     }
 
-    assert {key: app.normalize_key_for_core(key) for key in expected_keys} == expected_keys
+    assert {
+        key: app.normalize_key_for_core(key) for key in expected_keys
+    } == expected_keys
 
 
 def test_run_loop_passes_ui_configuration_to_core(monkeypatch, tmp_path):
@@ -279,7 +281,9 @@ def test_history_controls_restore_known_toggle_model_exactly(monkeypatch):
         "get_model_info",
         lambda: {
             "models": {
-                "Anthropic": {"toggle-model": {"extended_thinking": True, "effort_options": []}}
+                "Anthropic": {
+                    "toggle-model": {"extended_thinking": True, "effort_options": []}
+                }
             }
         },
     )
@@ -310,7 +314,9 @@ def test_history_controls_use_defaults_and_warn_for_legacy_reasoning(monkeypatch
         "get_model_info",
         lambda: {
             "models": {
-                "Anthropic": {"toggle-model": {"extended_thinking": True, "effort_options": []}}
+                "Anthropic": {
+                    "toggle-model": {"extended_thinking": True, "effort_options": []}
+                }
             }
         },
     )
@@ -334,7 +340,9 @@ def test_history_controls_use_defaults_and_warn_for_legacy_reasoning(monkeypatch
     assert updates.warnings == ("Reasoning settings weren't saved; defaults applied.",)
 
 
-def test_history_controls_preserve_unavailable_provider_and_model_without_discovery(monkeypatch):
+def test_history_controls_preserve_unavailable_provider_and_model_without_discovery(
+    monkeypatch,
+):
     monkeypatch.setattr(
         app,
         "get_model_info",
@@ -380,28 +388,36 @@ def test_prompt_override_uses_the_app_data_directory(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "PROMPT_OVERRIDE_PATH", override_path)
 
     assert app.load_app_prompt_override() is None
-    assert app.save_prompts("standalone override").startswith("Prompts saved successfully")
+    assert app.save_prompts("standalone override").startswith(
+        "Prompts saved successfully"
+    )
     assert override_path.read_text(encoding="utf-8") == "standalone override"
     assert app.load_app_prompt_override() == "standalone override"
 
 
-def test_rerender_current_audio_skips_existing_matching_soundfont(monkeypatch, tmp_path):
+def test_rerender_current_audio_skips_existing_matching_soundfont(
+    monkeypatch, tmp_path
+):
     midi_path = _write_binary_file(tmp_path / "loop.mid")
     audio_path = _write_binary_file(tmp_path / "loop.mp3")
 
     monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "custom.sf2")
 
     def fail_render(*args, **kwargs):
-        raise AssertionError("midi_to_mp3 should not be called when the audio is already current")
+        raise AssertionError(
+            "midi_to_mp3 should not be called when the audio is already current"
+        )
 
     monkeypatch.setattr(app, "midi_to_mp3", fail_render)
 
-    rerendered_audio_path, status, saved_soundfont, current_audio_path = app.rerender_current_audio(
-        str(midi_path),
-        "custom.sf2",
-        "custom.sf2",
-        "gen_1",
-        str(audio_path),
+    rerendered_audio_path, status, saved_soundfont, current_audio_path = (
+        app.rerender_current_audio(
+            str(midi_path),
+            "custom.sf2",
+            "custom.sf2",
+            "gen_1",
+            str(audio_path),
+        )
     )
 
     assert rerendered_audio_path == str(audio_path)
@@ -429,12 +445,14 @@ def test_rerender_current_audio_updates_saved_generation(monkeypatch, tmp_path):
         ),
     )
 
-    rerendered_audio_path, status, saved_soundfont, current_audio_path = app.rerender_current_audio(
-        str(midi_path),
-        "custom.sf2",
-        "old.sf2",
-        "gen_1",
-        None,
+    rerendered_audio_path, status, saved_soundfont, current_audio_path = (
+        app.rerender_current_audio(
+            str(midi_path),
+            "custom.sf2",
+            "old.sf2",
+            "gen_1",
+            None,
+        )
     )
 
     assert rerendered_audio_path == str(tmp_path / "saved-loop.mp3")
@@ -447,7 +465,9 @@ def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tm
     midi_path = _write_binary_file(tmp_path / "loop.mid")
     audio_path = _write_binary_file(tmp_path / "loop.mp3")
 
-    monkeypatch.setattr(app, "get_soundfont_choices", lambda: ["FM-Piano1 20190916.sf2", "new.sf2"])
+    monkeypatch.setattr(
+        app, "get_soundfont_choices", lambda: ["FM-Piano1 20190916.sf2", "new.sf2"]
+    )
     monkeypatch.setattr(
         app,
         "get_default_soundfont",
@@ -473,7 +493,9 @@ def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tm
     )
     monkeypatch.setattr(app, "MidiFile", lambda path: object())
     monkeypatch.setattr(app, "visualize_midi_plotly", lambda midi: "viz")
-    monkeypatch.setattr(app, "is_playback_available", lambda soundfont_name=None: (True, None))
+    monkeypatch.setattr(
+        app, "is_playback_available", lambda soundfont_name=None: (True, None)
+    )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
     (
@@ -515,11 +537,15 @@ def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tm
     assert effort_update["value"] == "low"
 
 
-def test_load_history_item_error_paths_preserve_parameter_controls(monkeypatch, tmp_path):
+def test_load_history_item_error_paths_preserve_parameter_controls(
+    monkeypatch, tmp_path
+):
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
     monkeypatch.setattr(app, "get_soundfont_choices", list)
     monkeypatch.setattr(app, "get_default_soundfont", lambda: None)
-    monkeypatch.setattr(app, "is_playback_available", lambda soundfont_name=None: (False, None))
+    monkeypatch.setattr(
+        app, "is_playback_available", lambda soundfont_name=None: (False, None)
+    )
 
     monkeypatch.setattr(app, "get_generation", lambda gen_id: None)
     no_selection = app.load_history_item(None)
@@ -543,15 +569,21 @@ def test_load_history_item_error_paths_preserve_parameter_controls(monkeypatch, 
 def test_refresh_soundfont_controls_updates_dropdown_choices(monkeypatch):
     midi_path = _write_binary_file(Path("active.mid"))
 
-    monkeypatch.setattr(app, "get_soundfont_choices", lambda: ["FM-Piano1 20190916.sf2", "new.sf2"])
+    monkeypatch.setattr(
+        app, "get_soundfont_choices", lambda: ["FM-Piano1 20190916.sf2", "new.sf2"]
+    )
     monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "new.sf2")
-    monkeypatch.setattr(app, "is_playback_available", lambda soundfont_name=None: (True, None))
+    monkeypatch.setattr(
+        app, "is_playback_available", lambda soundfont_name=None: (True, None)
+    )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
     try:
-        dropdown_update, rerender_update, status_message = app.refresh_soundfont_controls(
-            "new.sf2",
-            str(midi_path),
+        dropdown_update, rerender_update, status_message = (
+            app.refresh_soundfont_controls(
+                "new.sf2",
+                str(midi_path),
+            )
         )
 
         assert dropdown_update["choices"] == ["FM-Piano1 20190916.sf2", "new.sf2"]
@@ -563,12 +595,17 @@ def test_refresh_soundfont_controls_updates_dropdown_choices(monkeypatch):
 
 
 def test_refresh_soundfont_controls_prefers_dependency_status_message(monkeypatch):
-    monkeypatch.setattr(app, "get_soundfont_choices", lambda: ["FM-Piano1 20190916.sf2", "new.sf2"])
+    monkeypatch.setattr(
+        app, "get_soundfont_choices", lambda: ["FM-Piano1 20190916.sf2", "new.sf2"]
+    )
     monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "new.sf2")
     monkeypatch.setattr(
         app,
         "is_playback_available",
-        lambda soundfont_name=None: (False, "FluidSynth is not installed or not in PATH"),
+        lambda soundfont_name=None: (
+            False,
+            "FluidSynth is not installed or not in PATH",
+        ),
     )
     monkeypatch.setattr(
         app,
@@ -594,7 +631,9 @@ def test_refresh_soundfont_controls_prefers_dependency_status_message(monkeypatc
 
 def test_get_rerender_button_update_requires_active_midi(monkeypatch):
     monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "new.sf2")
-    monkeypatch.setattr(app, "is_playback_available", lambda soundfont_name=None: (True, None))
+    monkeypatch.setattr(
+        app, "is_playback_available", lambda soundfont_name=None: (True, None)
+    )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
     rerender_update = app.get_rerender_button_update("new.sf2", None)
@@ -602,7 +641,9 @@ def test_get_rerender_button_update_requires_active_midi(monkeypatch):
     assert rerender_update["interactive"] is False
 
 
-def test_delete_history_item_disables_rerender_for_deleted_loaded_generation(monkeypatch, tmp_path):
+def test_delete_history_item_disables_rerender_for_deleted_loaded_generation(
+    monkeypatch, tmp_path
+):
     midi_path = _write_binary_file(tmp_path / "loop.mid")
     audio_path = _write_binary_file(tmp_path / "loop.mp3")
 
@@ -610,7 +651,9 @@ def test_delete_history_item_disables_rerender_for_deleted_loaded_generation(mon
     monkeypatch.setattr(app, "get_history_choices", lambda: ["gen_2"])
     monkeypatch.setattr(app, "render_history_html", lambda: "<div>history</div>")
     monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "new.sf2")
-    monkeypatch.setattr(app, "is_playback_available", lambda soundfont_name=None: (True, None))
+    monkeypatch.setattr(
+        app, "is_playback_available", lambda soundfont_name=None: (True, None)
+    )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
     (
@@ -801,7 +844,9 @@ def test_render_history_html_escapes_persisted_metadata(monkeypatch):
 
     rendered_history = app.render_history_html()
 
-    assert 'data-id="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"' in rendered_history
+    assert (
+        'data-id="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"' in rendered_history
+    )
     assert "&lt;b&gt;C&lt;/b&gt; &lt;i&gt;Major&lt;/i&gt;" in rendered_history
     assert "&lt;img src=x onerror=alert(1)&gt;" in rendered_history
     assert "&lt;em&gt;model&lt;/em&gt;" in rendered_history
@@ -812,9 +857,13 @@ def test_render_history_html_escapes_persisted_metadata(monkeypatch):
 
 
 def test_refresh_soundfont_controls_stays_disabled_after_active_delete(monkeypatch):
-    monkeypatch.setattr(app, "get_soundfont_choices", lambda: ["FM-Piano1 20190916.sf2", "new.sf2"])
+    monkeypatch.setattr(
+        app, "get_soundfont_choices", lambda: ["FM-Piano1 20190916.sf2", "new.sf2"]
+    )
     monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "new.sf2")
-    monkeypatch.setattr(app, "is_playback_available", lambda soundfont_name=None: (True, None))
+    monkeypatch.setattr(
+        app, "is_playback_available", lambda soundfont_name=None: (True, None)
+    )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
     _, rerender_update, _ = app.refresh_soundfont_controls("new.sf2", None)
@@ -831,7 +880,9 @@ def test_history_toggle_resizes_piano_roll_after_sidebar_update():
         if dependency["api_name"] == "toggle_history_sidebar"
     )
     resize_dependency = next(
-        dependency for dependency in dependencies if dependency["js"] == app.PIANO_ROLL_RESIZE_JS
+        dependency
+        for dependency in dependencies
+        if dependency["js"] == app.PIANO_ROLL_RESIZE_JS
     )
 
     piano_roll = next(
@@ -852,7 +903,9 @@ def test_history_load_callback_updates_all_parameter_controls_once():
         for dependency in demo.config["dependencies"]
         if dependency["api_name"] == "load_history_item"
     )
-    components_by_id = {component["id"]: component for component in demo.config["components"]}
+    components_by_id = {
+        component["id"]: component for component in demo.config["components"]
+    }
     restored_labels = [
         components_by_id[component_id]["props"].get("label")
         for component_id in dependency["outputs"][-8:]
@@ -884,8 +937,12 @@ def test_model_sync_callbacks_only_run_for_user_input():
         if dependency["api_name"] in sync_api_names
     ]
 
-    assert {dependency["api_name"] for dependency in sync_dependencies} == sync_api_names
-    assert all(dependency["targets"][0][1] == "input" for dependency in sync_dependencies)
+    assert {
+        dependency["api_name"] for dependency in sync_dependencies
+    } == sync_api_names
+    assert all(
+        dependency["targets"][0][1] == "input" for dependency in sync_dependencies
+    )
 
 
 def test_main_allows_gradio_to_serve_generation_history(monkeypatch, tmp_path):
@@ -896,9 +953,13 @@ def test_main_allows_gradio_to_serve_generation_history(monkeypatch, tmp_path):
         def launch(self, **kwargs):
             launched_with.update(kwargs)
 
-    monkeypatch.setattr(app, "HISTORY_STORE", SimpleNamespace(artifact_root=str(artifact_root)))
+    monkeypatch.setattr(
+        app, "HISTORY_STORE", SimpleNamespace(artifact_root=str(artifact_root))
+    )
     monkeypatch.setattr(app, "get_selected_soundfont", lambda: None)
-    monkeypatch.setattr(app, "is_playback_available", lambda soundfont=None: (True, None))
+    monkeypatch.setattr(
+        app, "is_playback_available", lambda soundfont=None: (True, None)
+    )
     monkeypatch.setattr(app, "create_demo", lambda playback_status=None: FakeDemo())
 
     app.main()
@@ -921,7 +982,10 @@ def test_app_data_dir_defaults_to_the_conductor_main_directory(monkeypatch, tmp_
 
     assert app._resolve_conductor_home() == tmp_path / ".conductor"
     assert app._resolve_app_data_dir() == tmp_path / ".conductor" / "main"
-    assert app._resolve_app_soundfont_dir() == tmp_path / ".conductor" / "main" / "soundfonts"
+    assert (
+        app._resolve_app_soundfont_dir()
+        == tmp_path / ".conductor" / "main" / "soundfonts"
+    )
 
 
 def test_app_data_dir_honors_conductor_home(monkeypatch, tmp_path):

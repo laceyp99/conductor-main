@@ -22,8 +22,10 @@ def test_gradio_meets_windows_path_traversal_security_floor():
     reason="GHSA-39mp-8hj3-5c49 affects Windows on Python 3.13+",
 )
 def test_root_relative_static_path_cannot_read_windows_files(monkeypatch):
-    monkeypatch.setattr(app.ollama_api, "get_ollama_status", lambda: {"available": False})
-    monkeypatch.setattr(app, "load_history", lambda: [])
+    monkeypatch.setattr(
+        app.ollama_api, "get_ollama_status", lambda: {"available": False}
+    )
+    monkeypatch.setattr(app, "load_history", list)
 
     demo = app.create_demo(playback_status=(False, "disabled for security test"))
     server = gr.mount_gradio_app(
@@ -35,7 +37,9 @@ def test_root_relative_static_path_cannot_read_windows_files(monkeypatch):
 
     async def request_advisory_path():
         transport = ASGITransport(app=server)
-        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
             return await client.get("/static//windows/win.ini")
 
     response = asyncio.run(request_advisory_path())

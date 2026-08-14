@@ -6,7 +6,9 @@ from pathlib import Path
 
 def test_gradio_client_does_not_import_legacy_application_modules():
     package_root = Path(__file__).parents[1] / "src" / "conductor_main"
-    source = "\n".join(path.read_text(encoding="utf-8") for path in package_root.glob("*.py"))
+    source = "\n".join(
+        path.read_text(encoding="utf-8") for path in package_root.glob("*.py")
+    )
 
     assert "from src" not in source
     assert "import src" not in source

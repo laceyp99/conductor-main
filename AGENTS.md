@@ -26,13 +26,14 @@ playback helpers belong to `conductor-core`.
 
 ## Validation
 
-Install a compatible `conductor-core`, then run:
+Sync the locked development environment, then run:
 
 ```powershell
-python -m ruff format --check .
-python -m ruff check .
-python -m pytest -q
-python -m build
+uv sync --locked --extra dev
+uv run --locked --extra dev ruff format --check .
+uv run --locked --extra dev ruff check .
+uv run --locked --extra dev pytest -q
+uv build
 ```
 
 Manually smoke-test provider/model selectors and generation when callback or

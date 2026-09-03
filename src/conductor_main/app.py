@@ -19,6 +19,7 @@ from queue import Empty, Queue
 
 import gradio as gr
 from conductor_core import (
+    AudioRenderingError,
     EngineConfig,
     GenerationRequest,
     LoopGenerationEngine,
@@ -538,15 +539,16 @@ def rerender_current_audio(
         )
 
     output_path = current_audio_path or str(Path(midi_path).with_suffix(".mp3"))
-    rendered_audio_path = midi_to_mp3(
-        midi_path,
-        output_path=output_path,
-        soundfont_name=selected_soundfont,
-    )
-    if rendered_audio_path is None:
+    try:
+        rendered_audio_path = midi_to_mp3(
+            midi_path,
+            output_path=output_path,
+            soundfont_name=selected_soundfont,
+        )
+    except AudioRenderingError as exc:
         return (
             current_audio_path,
-            get_playback_status_message(selected_soundfont),
+            str(exc),
             saved_soundfont,
             current_audio_path,
         )
@@ -745,7 +747,7 @@ def run_loop(
             result.midi_path,
             result.audio_path,
             visualization,
-            "",
+            "\n".join(result.warnings),
             gr.update(visible=False),
             result.generation_id,
             result.metadata.soundfont,

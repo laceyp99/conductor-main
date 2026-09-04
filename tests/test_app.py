@@ -2,7 +2,7 @@ from pathlib import Path
 from threading import Event, Thread
 from types import SimpleNamespace
 
-from conductor_core.storage import GenerationMetadata
+from conductor_core import AudioRenderingError, GenerationMetadata
 
 from conductor_main import app
 
@@ -53,6 +53,7 @@ def test_run_loop_passes_ui_configuration_to_core(monkeypatch, tmp_path):
                 cost=0.25,
                 generation_id="fixed_id",
                 metadata=SimpleNamespace(soundfont=None),
+                warnings=["Audio rendering was skipped or failed."],
             )
 
     monkeypatch.setattr(app, "LoopGenerationEngine", FakeEngine)
@@ -77,6 +78,7 @@ def test_run_loop_passes_ui_configuration_to_core(monkeypatch, tmp_path):
 
     assert final_output[0] == str(midi_path)
     assert final_output[2] == "viz"
+    assert final_output[3] == "Audio rendering was skipped or failed."
     assert captured["config"].prompt_override == "override prompt"
     assert captured["config"].provider_credentials.openai_api_key == "openai-key"
     assert captured["config"].provider_credentials.google_api_key == "gemini-key"
@@ -459,6 +461,33 @@ def test_rerender_current_audio_updates_saved_generation(monkeypatch, tmp_path):
     assert status == "Rendered audio with custom.sf2."
     assert saved_soundfont == "custom.sf2"
     assert current_audio_path == str(tmp_path / "saved-loop.mp3")
+
+
+def test_rerender_current_audio_reports_core_rendering_error(monkeypatch, tmp_path):
+    midi_path = _write_binary_file(tmp_path / "loop.mid")
+    current_audio = _write_binary_file(tmp_path / "current.mp3")
+
+    monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "custom.sf2")
+
+    def fail_render(*args, **kwargs):
+        raise AudioRenderingError("FluidSynth timed out")
+
+    monkeypatch.setattr(app, "midi_to_mp3", fail_render)
+
+    result = app.rerender_current_audio(
+        str(midi_path),
+        "custom.sf2",
+        "old.sf2",
+        "gen_1",
+        str(current_audio),
+    )
+
+    assert result == (
+        str(current_audio),
+        "FluidSynth timed out",
+        "old.sf2",
+        str(current_audio),
+    )
 
 
 def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tmp_path):

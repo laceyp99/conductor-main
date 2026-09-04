@@ -487,8 +487,8 @@ wheels = [
 
 [[package]]
 name = "conductor-core"
-version = "0.4.0"
-source = { git = "https://github.com/laceyp99/conductor-core.git?rev=v0.4.0#bd4709e5124d012f5aaa8b204ea83037b29c4e5a" }
+version = "0.5.0"
+source = { git = "https://github.com/laceyp99/conductor-core.git?rev=v0.5.0#b61a6544fd565cb5229bbec7385f513a4a5bafc2" }
 dependencies = [
     { name = "mido" },
     { name = "pydantic" },
@@ -496,7 +496,7 @@ dependencies = [
 
 [package.optional-dependencies]
 playback = [
-    { name = "midi2audio" },
+    { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
     { name = "pydub" },
 ]
 providers = [
@@ -525,7 +525,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "conductor-core", extras = ["providers", "playback"], git = "https://github.com/laceyp99/conductor-core.git?rev=v0.4.0" },
+    { name = "conductor-core", extras = ["providers", "playback"], git = "https://github.com/laceyp99/conductor-core.git?rev=v0.5.0" },
     { name = "gradio", specifier = "==6.20.0" },
     { name = "mido", specifier = "==1.3.3" },
     { name = "plotly", specifier = "==6.0.1" },
@@ -1127,15 +1127,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729, upload-time = "2022-08-14T12:40:10.846Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
-]
-
-[[package]]
-name = "midi2audio"
-version = "0.1.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a8/1c/b96b5d797cb622753fef9dd5ac2116ee9f3585727d60212f892fb4bd175e/midi2audio-0.1.1.tar.gz", hash = "sha256:b26590388e1f62753096b075b877e2529ff62faad00c07811ac8111a73e4a78a", size = 4978, upload-time = "2016-11-20T19:48:34.649Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/75/23618a687fc2391192c9d9ec8906a198a3f318f146388d3b96f779826d43/midi2audio-0.1.1-py2.py3-none-any.whl", hash = "sha256:762a2df3806d373f7f89962f22ecc6d3cb49f82ae4212fab560a479cbb6c9c08", size = 8742, upload-time = "2016-11-20T19:48:31.42Z" },
 ]
 
 [[package]]

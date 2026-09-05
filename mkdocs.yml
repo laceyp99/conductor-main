@@ -1,0 +1,50 @@
+site_name: Conductor Main
+site_description: Documentation for Conductor Main, the interactive Gradio client for conductor-core.
+repo_url: https://github.com/laceyp99/conductor-main
+repo_name: laceyp99/conductor-main
+
+theme:
+  name: material
+  language: en
+  logo: assets/icon.png
+  favicon: assets/icon.png
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - toc.follow
+    - content.code.copy
+    - content.tabs.link
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Follow system theme
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: orange
+      accent: brown
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: orange
+      accent: brown
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+
+nav:
+  - Overview: index.md
+  - Getting started: getting-started.md
+  - Usage Guide: usage.md
+  - Audio & Data Management: audio-and-data.md
+  - Development & Troubleshooting: development.md
+
+strict: true

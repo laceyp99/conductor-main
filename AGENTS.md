@@ -42,6 +42,7 @@ current feature set; do not add features that bypass Core's engine.
 - Importing the package must not launch Gradio.
 - Do not make live provider calls during ordinary tests.
 - Do not commit API keys, prompt experiments, generations, or build output.
+- Keep relevant documentation and the changelog in sync with behavior changes.
 
 ## Stop hitting yourself
 

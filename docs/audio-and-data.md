@@ -29,6 +29,19 @@ $env:CONDUCTOR_MAIN_SOUNDFONT_DIR = "D:\Music\SoundFonts"
 
 The most specific variable wins. Relative paths remain relative to the process working directory, while paths beginning with `~` expand to the user home.
 
+```mermaid
+flowchart TD
+    Start[Resolve client data directory] --> Client{CONDUCTOR_MAIN_DATA_DIR set?}
+    Client -->|Yes| ClientPath[Use its value directly]
+    Client -->|No| Suite{CONDUCTOR_HOME set?}
+    Suite -->|Yes| SuitePath[Append main to CONDUCTOR_HOME]
+    Suite -->|No| Default[Use ~/.conductor/main]
+
+    SoundFont[Resolve user SoundFont directory] --> Override{CONDUCTOR_MAIN_SOUNDFONT_DIR set?}
+    Override -->|Yes| SoundFontPath[Use its value directly]
+    Override -->|No| DataPath[Use soundfonts under resolved client data directory]
+```
+
 ## SoundFonts and Audio Playback
 
 The app discovers packaged and user-available `.sf2` SoundFonts through Core. Core ships the default SoundFont; drop additional `.sf2` files into the `~/.conductor/main/soundfonts/` directory (or the directory set by `CONDUCTOR_MAIN_SOUNDFONT_DIR`) to make them selectable.

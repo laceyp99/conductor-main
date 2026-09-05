@@ -25,6 +25,28 @@ warm neo-soul electric piano chords with syncopated upper extensions and a simpl
 
 The selected key and scale are added to the request automatically.
 
+### What happens during generation
+
+```mermaid
+flowchart LR
+    Input[Loop description and settings] --> UI[Conductor Main]
+    UI --> Core[Conductor Core generation engine]
+    Core --> Provider[Selected model provider]
+    Provider --> Core
+    Core --> Save[Save MIDI and generation metadata]
+    Save --> Visualize[Build piano-roll visualization]
+    Save --> Audio{Audio tools available?}
+    Audio -->|Yes| Render[Render playback audio]
+    Audio -->|No| MidiOnly[MIDI remains available]
+    Visualize --> Results[Completed view]
+    Render --> Results
+    MidiOnly --> Results
+```
+
+Conductor Main collects the settings and presents the results, while Core owns
+provider communication, structured response parsing, MIDI creation, persistence,
+and optional audio rendering.
+
 ## Model-Specific Controls
 
 Conductor Main reads packaged model metadata and adapts its controls when the provider or model changes:
@@ -50,3 +72,13 @@ Deleting the override file returns the app to Core's packaged prompt.
 ## Stop Waiting Behavior
 
 Generation runs in a background thread so Gradio can continue yielding status updates. **Stop Waiting** detaches the UI from the current wait, but it cannot cancel a provider request already in flight. The provider may still finish and incur cost after the UI stops displaying progress.
+
+```mermaid
+flowchart TD
+    Start[Generate Loop] --> Request[Provider request begins]
+    Request --> Waiting{Still waiting?}
+    Waiting -->|Provider finishes| Results[Show generated results]
+    Waiting -->|Stop Waiting clicked| Detached[UI stops showing progress]
+    Detached --> InFlight[Provider request may remain in flight]
+    InFlight --> Cost[Request may finish and incur cost]
+```

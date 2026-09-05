@@ -9,9 +9,9 @@ uv sync --locked
 uv run --locked conductor-main
 ```
 
-`uv sync` creates the project `.venv` and installs the locked `conductor-core` dependency automatically. Activating the environment is not required.
+`uv sync` creates the project `.venv` and installs the locked `conductor-core` dependency automatically.
 
-The app opens at `http://127.0.0.1:7860/`.
+The app opens at [http://127.0.0.1:7860/](http://127.0.0.1:7860/).
 
 ## Provider Setup
 
@@ -26,4 +26,4 @@ $env:ANTHROPIC_API_KEY = "..."
 $env:OLLAMA_API_HOST_ADDRESS = "http://localhost:11434"
 ```
 
-Ollama appears as a provider only when its configured server is reachable and reports installed models. Cloud provider usage may incur charges.
+`Ollama` appears as a provider only when its configured server is reachable and reports installed models. Cloud provider usage may incur charges.

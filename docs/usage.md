@@ -54,7 +54,7 @@ Conductor Main reads packaged model metadata and adapts its controls when the pr
 | Control | Behavior |
 |---|---|
 | **Temperature** | Shown for models that accept sampling temperature |
-| **Reasoning** | Toggle used by supported Anthropic and Google models |
+| **Reasoning** | Toggle used by supported legacy Anthropic and Google models |
 | **Reasoning Effort** | Model-specific choices such as `minimal`, `low`, `high`, or `xhigh` |
 
 Changing providers resets the model to a valid choice and refreshes dependent controls. A hidden control is intentionally unavailable for that model rather than missing from the installation.

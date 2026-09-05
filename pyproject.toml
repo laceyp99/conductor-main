@@ -20,6 +20,9 @@ dev = [
     "pytest>=8.3,<9",
     "ruff==0.16.2",
 ]
+docs = [
+    "mkdocs-material>=9.6,<10",
+]
 
 [project.scripts]
 conductor-main = "conductor_main.app:main"

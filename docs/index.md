@@ -1,8 +1,6 @@
 # Conductor Main Documentation
 
-Welcome to the documentation for **Conductor Main**, the interactive Gradio client for `conductor-core`.
-
-Conductor Main provides a browser-based workflow for generating, auditioning, visualizing, editing, and revisiting four-bar MIDI loops created with AI foundation models.
+**Conductor Main** provides a browser-based workflow for generating, auditioning, visualizing, editing, and revisiting four-bar MIDI loops created with AI foundation models.
 
 ## Documentation Overview
 
@@ -10,3 +8,5 @@ Conductor Main provides a browser-based workflow for generating, auditioning, vi
 - [Usage Guide](usage.md): How to generate loops, model-specific controls, prompt overrides, and "Stop Waiting" behavior.
 - [Audio & Data Management](audio-and-data.md): Data directory layouts, SoundFonts, audio rendering, and generation history.
 - [Development & Troubleshooting](development.md): Local development workflow, validation checks, troubleshooting common problems, and known limitations.
+
+For a short project overview, see the [repository README](https://github.com/laceyp99/conductor-main#readme).

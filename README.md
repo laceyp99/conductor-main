@@ -20,7 +20,7 @@ uv sync --locked
 uv run --locked conductor-main
 ```
 
-The app opens at `http://127.0.0.1:7860/`.
+The app opens at [http://127.0.0.1:7860/](http://127.0.0.1:7860/).
 
 ## Key Features
 
@@ -33,13 +33,6 @@ The app opens at `http://127.0.0.1:7860/`.
 
 ## Documentation
 
-Full documentation formatted for MkDocs is available in the [`docs/`](docs/) directory:
-
-- [Getting Started & Provider Setup](docs/getting-started.md)
-- [Usage Guide & Controls](docs/usage.md)
-- [Audio, SoundFonts & Data Management](docs/audio-and-data.md)
-- [Development, Validation & Troubleshooting](docs/development.md)
-
 To browse the documentation locally with MkDocs:
 
 ```powershell
@@ -47,7 +40,14 @@ uv sync --locked --extra docs
 uv run --locked --extra docs mkdocs serve
 ```
 
-The documentation server opens at `http://127.0.0.1:8000/`.
+The documentation server opens at [http://127.0.0.1:8000/](http://127.0.0.1:8000/).
+
+Full documentation formatted for MkDocs is available in the [`docs/`](docs/) directory:
+
+- [Getting Started & Provider Setup](docs/getting-started.md)
+- [Usage Guide & Controls](docs/usage.md)
+- [Audio, SoundFonts & Data Management](docs/audio-and-data.md)
+- [Development, Validation & Troubleshooting](docs/development.md)
 
 ## Development and Validation
 

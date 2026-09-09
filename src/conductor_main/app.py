@@ -25,7 +25,7 @@ from conductor_core import (
     LoopGenerationEngine,
     ProviderCredentials,
 )
-from conductor_core.music import get_loop_prompt, get_model_info
+from conductor_core.music import ENHARMONIC_NOTE_NAMES, get_loop_prompt, get_model_info
 from conductor_core.playback import (
     add_soundfont_search_dir,
     get_default_soundfont,
@@ -44,12 +44,31 @@ DEFAULT_PROVIDER = "Google"
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 CONDUCTOR_APP_DIRNAME = "main"
 MAX_HISTORY_GENERATIONS = 20
+KEY_CHOICES = (
+    "C",
+    "C#/Db",
+    "D",
+    "D#/Eb",
+    "E",
+    "F",
+    "F#/Gb",
+    "G",
+    "G#/Ab",
+    "A",
+    "A#/Bb",
+    "B",
+)
 SHARP_KEY_ALIASES = {
     "C#/Db": "C#",
     "D#/Eb": "D#",
     "F#/Gb": "F#",
     "G#/Ab": "G#",
     "A#/Bb": "A#",
+}
+CORE_KEY_TO_UI = {
+    key: KEY_CHOICES[pitch_class]
+    for pitch_class, keys in enumerate(ENHARMONIC_NOTE_NAMES)
+    for key in keys
 }
 APP_CSS = """
 .center-title { text-align: center; font-size: 3em; }
@@ -121,6 +140,14 @@ def load_history():
 def normalize_key_for_core(key):
     """Translate combined black-key UI labels to Core's sharp spelling."""
     return SHARP_KEY_ALIASES.get(key, key)
+
+
+def normalize_key_for_ui(key):
+    """Coerce a supported Core key spelling to its 12-note UI choice."""
+    if not isinstance(key, str):
+        return None
+
+    return CORE_KEY_TO_UI.get(normalize_key_for_core(key))
 
 
 def get_generation(gen_id):
@@ -223,6 +250,12 @@ def get_history_control_updates(gen):
     provider = gen.provider
     model = gen.model
     warnings = []
+    ui_key = normalize_key_for_ui(gen.key)
+    if ui_key is None:
+        key_update = gr.update()
+        warnings.append(f"Unavailable key: {gen.key!r}.")
+    else:
+        key_update = gr.update(value=ui_key)
 
     provider_choices = list(known_models)
     provider_is_available = provider in known_models
@@ -273,7 +306,7 @@ def get_history_control_updates(gen):
         effort_options.append(effort_value)
 
     return HistoryControlUpdates(
-        key=gr.update(value=gen.key),
+        key=key_update,
         scale=gr.update(value=gen.scale),
         description=gr.update(value=gen.prompt),
         provider=gr.update(choices=provider_choices, value=provider),
@@ -1109,20 +1142,7 @@ def create_demo(playback_status=None):
                         with gr.Column():
                             gr.Markdown("## Loop Parameters")
                             key_input = gr.Dropdown(
-                                choices=[
-                                    "C",
-                                    "C#/Db",
-                                    "D",
-                                    "D#/Eb",
-                                    "E",
-                                    "F",
-                                    "F#/Gb",
-                                    "G",
-                                    "G#/Ab",
-                                    "A",
-                                    "A#/Bb",
-                                    "B",
-                                ],
+                                choices=KEY_CHOICES,
                                 label="Key",
                                 value="C",
                             )

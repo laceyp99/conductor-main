@@ -796,6 +796,18 @@ def test_render_history_html_displays_zero_cost(monkeypatch):
     assert "Cost: N/A" not in html
 
 
+def test_history_uses_theme_aware_styles(monkeypatch):
+    monkeypatch.setattr(app, "load_history", list)
+
+    rendered_history = app.render_history_html()
+
+    assert 'class="history-empty"' in rendered_history
+    assert "background: var(--background-fill-primary)" in app.APP_CSS
+    assert "background: var(--block-background-fill)" in app.APP_CSS
+    assert "color: var(--body-text-color)" in app.APP_CSS
+    assert "color: var(--block-label-text-color)" in app.APP_CSS
+
+
 def test_render_history_html_displays_missing_cost_as_na(monkeypatch):
     monkeypatch.setattr(
         app,

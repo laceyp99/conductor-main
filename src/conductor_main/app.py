@@ -83,14 +83,48 @@ APP_CSS = """
     z-index: 1;
 }
 .history-sidebar {
-    background: #1a1a1a;
-    border-left: 1px solid #333;
+    background: var(--background-fill-primary);
+    border-left: 1px solid var(--border-color-primary);
+    color: var(--body-text-color);
     height: 100%;
     overflow-y: auto;
 }
+.history-item {
+    background: var(--block-background-fill);
+    border: 1px solid var(--border-color-primary);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 10px;
+}
 .history-item:hover {
-    border-color: #666 !important;
+    border-color: var(--border-color-accent) !important;
     cursor: pointer;
+}
+.history-item-title {
+    color: var(--body-text-color);
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+.history-item-prompt {
+    color: var(--block-label-text-color);
+    font-size: 0.85em;
+    margin-bottom: 6px;
+}
+.history-item-metadata {
+    color: var(--block-label-text-color);
+    display: flex;
+    font-size: 0.8em;
+    justify-content: space-between;
+}
+.history-item-cost {
+    color: var(--block-label-text-color);
+    font-size: 0.75em;
+    margin-top: 4px;
+}
+.history-empty {
+    color: var(--block-label-text-color);
+    padding: 20px;
+    text-align: center;
 }
 """
 
@@ -851,7 +885,7 @@ def render_history_html():
 
     if not history:
         return """
-        <div style="padding: 20px; text-align: center; color: #888;">
+        <div class="history-empty">
             <p>No generations yet.</p>
             <p style="font-size: 0.9em;">Your generated loops will appear here.</p>
         </div>
@@ -872,24 +906,18 @@ def render_history_html():
         reasoning_suffix = f" ({reasoning})" if reasoning else ""
 
         html_parts.append(f"""
-        <div class="history-item" data-id="{generation_id}" style="
-            background: #2a2a2a;
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 10px;
-            border: 1px solid #444;
-        ">
-            <div style="font-weight: bold; color: #fff; margin-bottom: 4px;">
+        <div class="history-item" data-id="{generation_id}">
+            <div class="history-item-title">
                 {key} {scale}
             </div>
-            <div style="font-size: 0.85em; color: #aaa; margin-bottom: 6px;">
+            <div class="history-item-prompt">
                 "{prompt_preview}"
             </div>
-            <div style="font-size: 0.8em; color: #888; display: flex; justify-content: space-between;">
+            <div class="history-item-metadata">
                 <span>{model}{reasoning_suffix}</span>
                 <span>{timestamp_str}</span>
             </div>
-            <div style="font-size: 0.75em; color: #666; margin-top: 4px;">
+            <div class="history-item-cost">
                 Cost: {cost_str}
             </div>
         </div>

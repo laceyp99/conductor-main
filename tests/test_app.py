@@ -27,6 +27,26 @@ def test_normalize_key_for_core_defaults_combined_black_keys_to_sharps():
     } == expected_keys
 
 
+def test_normalize_key_for_ui_coerces_core_enharmonics_to_twelve_choices():
+    expected_keys = {
+        "C#": "C#/Db",
+        "Db": "C#/Db",
+        "D#": "D#/Eb",
+        "F#": "F#/Gb",
+        "G#": "G#/Ab",
+        "A#": "A#/Bb",
+        "C##": "D",
+        "Gbb": "F",
+        "B#": "C",
+        "C": "C",
+    }
+
+    assert {
+        key: app.normalize_key_for_ui(key) for key in expected_keys
+    } == expected_keys
+    assert app.normalize_key_for_ui("not-a-key") is None
+
+
 def test_run_loop_passes_ui_configuration_to_core(monkeypatch, tmp_path):
     captured = {}
     midi_path = tmp_path / "loop.mid"
@@ -277,6 +297,42 @@ def test_history_controls_restore_known_effort_model_exactly(monkeypatch):
     assert updates.warnings == ()
 
 
+def test_history_controls_warn_and_preserve_key_for_invalid_saved_value(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_model_info",
+        lambda: {
+            "models": {
+                "OpenAI": {
+                    "known-model": {
+                        "extended_thinking": False,
+                        "effort_options": [],
+                    }
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    updates = app.get_history_control_updates(
+        SimpleNamespace(
+            key="not-a-key",
+            scale="Major",
+            prompt="restored prompt",
+            provider="OpenAI",
+            model="known-model",
+            temperature=0.5,
+            use_thinking=False,
+            effort="low",
+        )
+    )
+
+    assert updates.key == {}
+    assert updates.scale == {"value": "Major"}
+    assert updates.description == {"value": "restored prompt"}
+    assert updates.warnings == ("Unavailable key: 'not-a-key'.",)
+
+
 def test_history_controls_restore_known_toggle_model_exactly(monkeypatch):
     monkeypatch.setattr(
         app,
@@ -510,7 +566,7 @@ def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tm
             audio_path=str(audio_path),
             soundfont="missing.sf2",
             id=gen_id,
-            key="D",
+            key="C#",
             scale="minor",
             prompt="saved prompt",
             provider="Google",
@@ -556,7 +612,7 @@ def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tm
     assert saved_soundfont == "missing.sf2"
     assert current_audio_path == str(audio_path)
     assert rerender_update["interactive"] is True
-    assert key_update["value"] == "D"
+    assert key_update["value"] == "C#/Db"
     assert scale_update["value"] == "minor"
     assert description_update["value"] == "saved prompt"
     assert provider_update["value"] == "Google"
@@ -738,6 +794,14 @@ def test_render_history_html_displays_zero_cost(monkeypatch):
 
     assert "Cost: $0.0000" in html
     assert "Cost: N/A" not in html
+
+
+def test_render_history_html_uses_theme_aware_classes(monkeypatch):
+    monkeypatch.setattr(app, "load_history", list)
+
+    rendered_history = app.render_history_html()
+
+    assert 'class="history-empty"' in rendered_history
 
 
 def test_render_history_html_displays_missing_cost_as_na(monkeypatch):

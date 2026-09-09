@@ -25,7 +25,7 @@ from conductor_core import (
     LoopGenerationEngine,
     ProviderCredentials,
 )
-from conductor_core.music import get_loop_prompt, get_model_info
+from conductor_core.music import ENHARMONIC_NOTE_NAMES, get_loop_prompt, get_model_info
 from conductor_core.playback import (
     add_soundfont_search_dir,
     get_default_soundfont,
@@ -44,12 +44,31 @@ DEFAULT_PROVIDER = "Google"
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 CONDUCTOR_APP_DIRNAME = "main"
 MAX_HISTORY_GENERATIONS = 20
+KEY_CHOICES = (
+    "C",
+    "C#/Db",
+    "D",
+    "D#/Eb",
+    "E",
+    "F",
+    "F#/Gb",
+    "G",
+    "G#/Ab",
+    "A",
+    "A#/Bb",
+    "B",
+)
 SHARP_KEY_ALIASES = {
     "C#/Db": "C#",
     "D#/Eb": "D#",
     "F#/Gb": "F#",
     "G#/Ab": "G#",
     "A#/Bb": "A#",
+}
+CORE_KEY_TO_UI = {
+    key: KEY_CHOICES[pitch_class]
+    for pitch_class, keys in enumerate(ENHARMONIC_NOTE_NAMES)
+    for key in keys
 }
 APP_CSS = """
 .center-title { text-align: center; font-size: 3em; }
@@ -64,14 +83,48 @@ APP_CSS = """
     z-index: 1;
 }
 .history-sidebar {
-    background: #1a1a1a;
-    border-left: 1px solid #333;
+    background: var(--background-fill-primary);
+    border-left: 1px solid var(--border-color-primary);
+    color: var(--body-text-color);
     height: 100%;
     overflow-y: auto;
 }
+.history-item {
+    background: var(--block-background-fill);
+    border: 1px solid var(--border-color-primary);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 10px;
+}
 .history-item:hover {
-    border-color: #666 !important;
+    border-color: var(--border-color-accent) !important;
     cursor: pointer;
+}
+.history-item-title {
+    color: var(--body-text-color);
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+.history-item-prompt {
+    color: var(--block-label-text-color);
+    font-size: 0.85em;
+    margin-bottom: 6px;
+}
+.history-item-metadata {
+    color: var(--block-label-text-color);
+    display: flex;
+    font-size: 0.8em;
+    justify-content: space-between;
+}
+.history-item-cost {
+    color: var(--block-label-text-color);
+    font-size: 0.75em;
+    margin-top: 4px;
+}
+.history-empty {
+    color: var(--block-label-text-color);
+    padding: 20px;
+    text-align: center;
 }
 """
 
@@ -121,6 +174,14 @@ def load_history():
 def normalize_key_for_core(key):
     """Translate combined black-key UI labels to Core's sharp spelling."""
     return SHARP_KEY_ALIASES.get(key, key)
+
+
+def normalize_key_for_ui(key):
+    """Coerce a supported Core key spelling to its 12-note UI choice."""
+    if not isinstance(key, str):
+        return None
+
+    return CORE_KEY_TO_UI.get(normalize_key_for_core(key))
 
 
 def get_generation(gen_id):
@@ -223,6 +284,12 @@ def get_history_control_updates(gen):
     provider = gen.provider
     model = gen.model
     warnings = []
+    ui_key = normalize_key_for_ui(gen.key)
+    if ui_key is None:
+        key_update = gr.update()
+        warnings.append(f"Unavailable key: {gen.key!r}.")
+    else:
+        key_update = gr.update(value=ui_key)
 
     provider_choices = list(known_models)
     provider_is_available = provider in known_models
@@ -273,7 +340,7 @@ def get_history_control_updates(gen):
         effort_options.append(effort_value)
 
     return HistoryControlUpdates(
-        key=gr.update(value=gen.key),
+        key=key_update,
         scale=gr.update(value=gen.scale),
         description=gr.update(value=gen.prompt),
         provider=gr.update(choices=provider_choices, value=provider),
@@ -818,7 +885,7 @@ def render_history_html():
 
     if not history:
         return """
-        <div style="padding: 20px; text-align: center; color: #888;">
+        <div class="history-empty">
             <p>No generations yet.</p>
             <p style="font-size: 0.9em;">Your generated loops will appear here.</p>
         </div>
@@ -839,24 +906,18 @@ def render_history_html():
         reasoning_suffix = f" ({reasoning})" if reasoning else ""
 
         html_parts.append(f"""
-        <div class="history-item" data-id="{generation_id}" style="
-            background: #2a2a2a;
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 10px;
-            border: 1px solid #444;
-        ">
-            <div style="font-weight: bold; color: #fff; margin-bottom: 4px;">
+        <div class="history-item" data-id="{generation_id}">
+            <div class="history-item-title">
                 {key} {scale}
             </div>
-            <div style="font-size: 0.85em; color: #aaa; margin-bottom: 6px;">
+            <div class="history-item-prompt">
                 "{prompt_preview}"
             </div>
-            <div style="font-size: 0.8em; color: #888; display: flex; justify-content: space-between;">
+            <div class="history-item-metadata">
                 <span>{model}{reasoning_suffix}</span>
                 <span>{timestamp_str}</span>
             </div>
-            <div style="font-size: 0.75em; color: #666; margin-top: 4px;">
+            <div class="history-item-cost">
                 Cost: {cost_str}
             </div>
         </div>
@@ -1109,20 +1170,7 @@ def create_demo(playback_status=None):
                         with gr.Column():
                             gr.Markdown("## Loop Parameters")
                             key_input = gr.Dropdown(
-                                choices=[
-                                    "C",
-                                    "C#/Db",
-                                    "D",
-                                    "D#/Eb",
-                                    "E",
-                                    "F",
-                                    "F#/Gb",
-                                    "G",
-                                    "G#/Ab",
-                                    "A",
-                                    "A#/Bb",
-                                    "B",
-                                ],
+                                choices=KEY_CHOICES,
                                 label="Key",
                                 value="C",
                             )

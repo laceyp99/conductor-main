@@ -1227,7 +1227,10 @@ def create_demo(playback_status=None):
                         prog_output = gr.File(label="Download Generated MIDI")
                         # Audio playback component
                         audio_output = gr.Audio(
-                            label="Playback", type="filepath", interactive=False
+                            label="Playback",
+                            type="filepath",
+                            interactive=False,
+                            loop=True,
                         )
                         # Show playback status if not available
                         if not playback_available:

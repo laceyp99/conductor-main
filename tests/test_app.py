@@ -989,6 +989,18 @@ def test_history_toggle_resizes_piano_roll_after_sidebar_update():
     assert resize_dependency["queue"] is False
 
 
+def test_audio_playback_loops_generated_audio():
+    demo = app.create_demo(playback_status=(True, None))
+    audio = next(
+        component
+        for component in demo.config["components"]
+        if component["type"] == "audio"
+        and component["props"].get("label") == "Playback"
+    )
+
+    assert audio["props"]["loop"] is True
+
+
 def test_history_load_callback_updates_all_parameter_controls_once():
     demo = app.create_demo(playback_status=(True, None))
     dependency = next(

@@ -53,7 +53,7 @@ Audio rendering requires all of the following:
 3. FFmpeg installed and available on `PATH`;
 4. An available SoundFont.
 
-Use **Refresh SoundFonts** after adding a SoundFont while the app is running. Select a different SoundFont and click **Re-render Audio** to audition the current MIDI without regenerating it or making another provider call.
+Use **Refresh SoundFonts** after adding a SoundFont while the app is running. Select a different SoundFont and click **Re-render Audio** to audition the current MIDI without regenerating it or making another provider call. Playback repeats automatically so the four-bar loop can be auditioned continuously.
 
 If the audio toolchain is unavailable, MIDI generation still succeeds. The app shows the setup problem and leaves playback empty.
 

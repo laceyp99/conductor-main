@@ -778,7 +778,18 @@ def test_delete_requires_confirmation_and_clears_loaded_artifacts(
     )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
-    assert app.show_delete_confirmation("gen_1")[0] == {"visible": True}
+    assert app.show_delete_confirmation("gen_1")[:2] == (
+        {"visible": False},
+        {"visible": True},
+    )
+    assert app.cancel_delete_confirmation()[:2] == (
+        {"visible": True},
+        {"visible": False},
+    )
+    assert app.hide_delete_confirmation() == (
+        {"visible": True},
+        {"visible": False},
+    )
     assert deleted == []
     result = app.delete_history_item(
         "gen_1",
@@ -792,9 +803,9 @@ def test_delete_requires_confirmation_and_clears_loaded_artifacts(
     assert deleted == ["gen_1"]
     assert result[0] == {"choices": [("remaining", "gen_2")], "value": None}
     assert result[1] == "Deleted generation"
-    assert result[2] == {"visible": False}
-    assert result[3:9] == (None, None, None, None, None, None)
-    assert result[9]["interactive"] is False
+    assert result[2:4] == ({"visible": True}, {"visible": False})
+    assert result[4:10] == (None, None, None, None, None, None)
+    assert result[10]["interactive"] is False
 
 
 def test_history_empty_and_missing_selection(monkeypatch):
@@ -803,7 +814,10 @@ def test_history_empty_and_missing_selection(monkeypatch):
 
     assert app.get_history_choices() == []
     assert app.refresh_history("missing")["value"] is None
-    assert app.show_delete_confirmation(None)[0] == {"visible": False}
+    assert app.show_delete_confirmation(None)[:2] == (
+        {"visible": True},
+        {"visible": False},
+    )
     assert app.load_history_item(None)[4] == "No generation selected"
 
 
@@ -872,6 +886,23 @@ def test_history_sidebar_uses_one_selector_and_confirmed_delete():
     assert components[selector]["type"] == "radio"
     assert components[selector]["props"]["label"] == "Recent Generations"
     assert dependencies["show_delete_confirmation"]["inputs"] == [selector]
+    actions_id, confirmation_id, _ = dependencies["show_delete_confirmation"]["outputs"]
+    assert components[actions_id]["type"] == "row"
+    assert components[confirmation_id]["type"] == "row"
+    assert components[actions_id]["props"]["visible"] is True
+    assert components[confirmation_id]["props"]["visible"] is False
+    assert dependencies["hide_delete_confirmation"]["outputs"] == [
+        actions_id,
+        confirmation_id,
+    ]
+    assert dependencies["cancel_delete_confirmation"]["outputs"][:2] == [
+        actions_id,
+        confirmation_id,
+    ]
+    assert dependencies["delete_history_item"]["outputs"][2:4] == [
+        actions_id,
+        confirmation_id,
+    ]
     assert dependencies["delete_history_item"]["inputs"][0] == selector
     assert dependencies["refresh_history"]["inputs"] == [selector]
     sidebar_controls = [

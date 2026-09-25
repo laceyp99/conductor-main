@@ -871,16 +871,24 @@ def loaded_history_status(gen_id):
 def show_delete_confirmation(gen_id):
     """Require a separate confirmation before deleting a selected generation."""
     if not gen_id:
-        return gr.update(visible=False), "Select a generation to delete."
-    return gr.update(visible=True), "Confirm deletion of the selected generation."
+        return (
+            gr.update(visible=True),
+            gr.update(visible=False),
+            "Select a generation to delete.",
+        )
+    return (
+        gr.update(visible=False),
+        gr.update(visible=True),
+        "Confirm deletion of the selected generation.",
+    )
 
 
 def hide_delete_confirmation():
-    return gr.update(visible=False)
+    return gr.update(visible=True), gr.update(visible=False)
 
 
 def cancel_delete_confirmation():
-    return gr.update(visible=False), ""
+    return gr.update(visible=True), gr.update(visible=False), ""
 
 
 def load_history_item(gen_id):
@@ -988,6 +996,7 @@ def delete_history_item(
         return (
             gr.update(choices=get_history_choices(), value=None),
             "No generation selected",
+            gr.update(visible=True),
             gr.update(visible=False),
             gr.update(),
             gr.update(),
@@ -1004,6 +1013,7 @@ def delete_history_item(
     return (
         gr.update(choices=choices, value=None if success else gen_id),
         "Deleted generation" if success else "Failed to delete generation",
+        gr.update(visible=True),
         gr.update(visible=False),
         None if deleted_active else gr.update(),
         None if deleted_active else gr.update(),
@@ -1309,7 +1319,7 @@ def create_demo(playback_status=None):
             ) as history_sidebar:
                 gr.Markdown("## History")
 
-                with gr.Row():
+                with gr.Row() as history_actions:
                     load_btn = gr.Button("Load", size="sm", variant="primary")
                     delete_btn = gr.Button("Delete...", size="sm", variant="stop")
                     refresh_btn = gr.Button("Refresh", size="sm")
@@ -1345,7 +1355,7 @@ def create_demo(playback_status=None):
             outputs=[history_status],
         ).then(
             hide_delete_confirmation,
-            outputs=[delete_confirmation],
+            outputs=[history_actions, delete_confirmation],
         )
 
         # Load history item into main view
@@ -1380,11 +1390,11 @@ def create_demo(playback_status=None):
         delete_btn.click(
             show_delete_confirmation,
             inputs=[history_list],
-            outputs=[delete_confirmation, history_status],
+            outputs=[history_actions, delete_confirmation, history_status],
         )
         cancel_delete_btn.click(
             cancel_delete_confirmation,
-            outputs=[delete_confirmation, history_status],
+            outputs=[history_actions, delete_confirmation, history_status],
         )
         confirm_delete_btn.click(
             delete_history_item,
@@ -1399,6 +1409,7 @@ def create_demo(playback_status=None):
             outputs=[
                 history_list,
                 history_status,
+                history_actions,
                 delete_confirmation,
                 prog_output,
                 audio_output,

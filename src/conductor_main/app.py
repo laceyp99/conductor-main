@@ -1309,13 +1309,6 @@ def create_demo(playback_status=None):
             ) as history_sidebar:
                 gr.Markdown("## History")
 
-                history_list = gr.Radio(
-                    label="Recent Generations",
-                    choices=get_history_choices(),
-                    interactive=True,
-                    elem_classes=["history-list"],
-                )
-
                 with gr.Row():
                     load_btn = gr.Button("Load", size="sm", variant="primary")
                     delete_btn = gr.Button("Delete...", size="sm", variant="stop")
@@ -1326,6 +1319,12 @@ def create_demo(playback_status=None):
                     )
                     cancel_delete_btn = gr.Button("Cancel", size="sm")
                 history_status = gr.Textbox(label="History status", interactive=False)
+                history_list = gr.Radio(
+                    label="Recent Generations",
+                    choices=get_history_choices(),
+                    interactive=True,
+                    elem_classes=["history-list"],
+                )
 
         # History sidebar toggle
         history_toggle_event = history_toggle_btn.click(

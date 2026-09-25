@@ -874,6 +874,17 @@ def test_history_sidebar_uses_one_selector_and_confirmed_delete():
     assert dependencies["show_delete_confirmation"]["inputs"] == [selector]
     assert dependencies["delete_history_item"]["inputs"][0] == selector
     assert dependencies["refresh_history"]["inputs"] == [selector]
+    sidebar_controls = [
+        component["props"].get("label") or component["props"].get("value")
+        for component in demo.config["components"]
+    ]
+    assert sidebar_controls.index("Load") < sidebar_controls.index("Recent Generations")
+    assert sidebar_controls.index("Delete...") < sidebar_controls.index(
+        "Recent Generations"
+    )
+    assert sidebar_controls.index("History status") < sidebar_controls.index(
+        "Recent Generations"
+    )
     assert not any(
         component["type"] == "dropdown"
         and component["props"].get("label") == "Select Generation"

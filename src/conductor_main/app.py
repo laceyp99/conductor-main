@@ -41,9 +41,13 @@ from mido import MidiFile
 from conductor_main.visualization import visualize_midi_plotly
 
 DEFAULT_PROVIDER = "Google"
-DEFAULT_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_TEMPERATURE = 0.1
 CONDUCTOR_APP_DIRNAME = "main"
 MAX_HISTORY_GENERATIONS = 20
+# 0 sends no num_ctx, so Ollama's own default applies.
+OLLAMA_CONTEXT_SIZE_CHOICES = [("Ollama default", 0)] + [
+    (f"{size:,}", size) for size in (1024, 4096, 16384, 65536, 262144)
+]
 KEY_CHOICES = (
     "C",
     "C#/Db",
@@ -261,6 +265,8 @@ class HistoryControlUpdates:
     temperature: object
     use_thinking: object
     effort: object
+    requested_temperature: object
+    reasoning_control: object
     warnings: tuple[str, ...]
 
     def as_tuple(self):
@@ -274,6 +280,8 @@ class HistoryControlUpdates:
             self.temperature,
             self.use_thinking,
             self.effort,
+            self.requested_temperature,
+            self.reasoning_control,
         )
 
 
@@ -316,11 +324,19 @@ def get_history_control_updates(gen):
     reasoning_was_recorded = saved_thinking is not None and saved_effort is not None
 
     if model_is_available:
-        settings = get_model_settings(provider, model, bool(saved_thinking))
+        # A saved use_thinking=False on an effort model selects its off level.
+        settings = get_model_settings(
+            provider,
+            model,
+            bool(saved_thinking),
+            saved_effort if saved_thinking else None,
+        )
     else:
         settings = {
+            "reasoning_control": None,
             "show_temperature": True,
             "temperature_value": gen.temperature,
+            "temperature_interactive": True,
             "show_thinking": True,
             "thinking_value": False,
             "effort_options": [],
@@ -331,10 +347,14 @@ def get_history_control_updates(gen):
     if not reasoning_was_recorded:
         warnings.append("Reasoning settings weren't saved; defaults applied.")
 
-    thinking_value = (
-        saved_thinking if reasoning_was_recorded else settings["thinking_value"]
-    )
     effort_value = saved_effort if reasoning_was_recorded else settings["effort_value"]
+    if model_is_available:
+        # Known models derive use_thinking from their reasoning control.
+        thinking_value = settings["thinking_value"]
+        if settings["show_effort"]:
+            effort_value = settings["effort_value"]
+    else:
+        thinking_value = saved_thinking if reasoning_was_recorded else False
     effort_options = list(settings["effort_options"])
     if effort_value not in effort_options:
         effort_options.append(effort_value)
@@ -346,8 +366,11 @@ def get_history_control_updates(gen):
         provider=gr.update(choices=provider_choices, value=provider),
         model=gr.update(choices=model_choices, value=model),
         temperature=gr.update(
-            visible=settings["show_temperature"],
-            value=gen.temperature,
+            visible=get_temperature_visibility(settings["show_temperature"]),
+            value=gen.temperature
+            if settings["temperature_interactive"]
+            else settings["temperature_value"],
+            interactive=settings["temperature_interactive"],
         ),
         use_thinking=gr.update(
             visible=settings["show_thinking"],
@@ -358,6 +381,11 @@ def get_history_control_updates(gen):
             value=effort_value,
             visible=settings["show_effort"],
         ),
+        # A locked slider shows the fixed value, so keep the prior choice.
+        requested_temperature=gen.temperature
+        if settings["temperature_interactive"]
+        else gr.update(),
+        reasoning_control=settings["reasoning_control"],
         warnings=tuple(warnings),
     )
 
@@ -370,7 +398,8 @@ def get_providers():
     """
     model_info = get_model_info()
     providers = list(model_info["models"].keys())
-    if ollama_api.get_ollama_status()["available"]:
+    # get_model_list() lists names without inspecting every installed model.
+    if ollama_api.get_model_list():
         providers.append("Ollama")
     return providers
 
@@ -400,64 +429,134 @@ def get_selected_model(provider, model_choice):
     return models[0] if models else None
 
 
-def get_model_settings(provider, model_choice, use_thinking=False):
-    """Resolve the provider/model UI settings for dependent controls."""
-    selected_model = get_selected_model(provider, model_choice)
-    if not selected_model or provider == "Ollama":
-        return {
-            "selected_model": selected_model,
-            "show_temperature": True,
-            "temperature_value": 0.1,
-            "show_thinking": False,
-            "thinking_value": False,
-            "effort_options": [],
-            "effort_value": "low",
-            "show_effort": False,
-        }
+def get_model_config(provider, model):
+    """Return Core's reasoning and temperature metadata for one model."""
+    if provider == "Ollama":
+        return ollama_api.get_model_status(model)["model_capabilities"] or {}
+    return get_model_info()["models"].get(provider, {}).get(model, {})
 
-    model_info = get_model_info()
-    model_config = model_info["models"][provider][selected_model]
-    effort_options = model_config.get("effort_options", [])
-    supports_toggle_reasoning = (
-        provider in {"Anthropic", "Google"}
-        and model_config.get("extended_thinking", False)
-        and not effort_options
-    )
-    show_temperature = True
-    temperature_value = 0.1
 
-    if (provider == "OpenAI" and model_config.get("extended_thinking", False)) or (
-        provider in {"Anthropic", "Google"}
-        and (effort_options or (supports_toggle_reasoning and use_thinking))
+def get_effort_choices(model_config):
+    """Return effort levels, adding "none" when Core can switch thinking off."""
+    effort_options = list(model_config.get("effort_options") or [])
+    if (
+        effort_options
+        and model_config.get("thinking_off") == "disabled"
+        and "none" not in effort_options
     ):
-        show_temperature = False
-        temperature_value = 1.0
+        # "none" maps to use_thinking=False, Core's official thinking-off setting.
+        effort_options.insert(0, "none")
+    return effort_options
 
-    thinking_value = bool(use_thinking) if supports_toggle_reasoning else False
-    effort_value = effort_options[0] if effort_options else "low"
+
+def get_temperature_visibility(show_temperature):
+    """Keep a hidden temperature slider mounted.
+
+    Gradio only paints the slider's fill when its value changes, so a slider
+    re-created by visible=False shows an unfilled track until it is moved.
+    """
+    return True if show_temperature else "hidden"
+
+
+def get_reasoning_control(model_config):
+    """Pick the reasoning control Core's metadata calls for.
+
+    Returns "effort" for models with effort levels ("none", or else the lowest
+    level, is the off setting), "toggle" for models that can switch thinking off,
+    "always_on" for models that always reason without selectable levels, and
+    "none" for models without extended thinking.
+    """
+    if not model_config.get("extended_thinking"):
+        return "none"
+    if model_config.get("effort_options"):
+        return "effort"
+    if model_config.get("thinking_off", "disabled") == "disabled":
+        return "toggle"
+    return "always_on"
+
+
+def get_model_settings(
+    provider,
+    model_choice,
+    use_thinking=False,
+    effort=None,
+    requested_temperature=None,
+):
+    """Resolve the provider/model UI settings for dependent controls.
+
+    The requested effort and temperature carry over when the selected model
+    supports them; a fixed thinking temperature only overrides what is shown.
+    """
+    selected_model = get_selected_model(provider, model_choice)
+    model_config = get_model_config(provider, selected_model) if selected_model else {}
+    reasoning_control = get_reasoning_control(model_config)
+    effort_options = get_effort_choices(model_config)
+    if effort in effort_options:
+        effort_value = effort
+    else:
+        effort_value = effort_options[0] if effort_options else "low"
+    adds_none = "none" in effort_options and "none" not in (
+        model_config.get("effort_options") or []
+    )
+
+    # Effort models send use_thinking=True with the selected level, including
+    # a provider's own "none"; only the "none" Main adds sends use_thinking=False.
+    if reasoning_control == "toggle":
+        thinking_value = bool(use_thinking)
+    elif reasoning_control == "effort":
+        thinking_value = not (adds_none and effort_value == "none")
+    else:
+        thinking_value = reasoning_control == "always_on"
+
+    fixed_temperature = model_config.get("thinking_fixed_temperature")
+    temperature_is_fixed = thinking_value and fixed_temperature is not None
+    if requested_temperature is None:
+        requested_temperature = DEFAULT_TEMPERATURE
 
     return {
         "selected_model": selected_model,
-        "show_temperature": show_temperature,
-        "temperature_value": temperature_value,
-        "show_thinking": supports_toggle_reasoning,
+        "reasoning_control": reasoning_control,
+        "show_temperature": model_config.get("temperature_supported", True),
+        "temperature_value": fixed_temperature
+        if temperature_is_fixed
+        else requested_temperature,
+        "temperature_interactive": not temperature_is_fixed,
+        "show_thinking": reasoning_control == "toggle",
         "thinking_value": thinking_value,
         "effort_options": effort_options,
         "effort_value": effort_value,
-        "show_effort": bool(effort_options),
+        "show_effort": reasoning_control == "effort",
     }
 
 
-def sync_model_capabilities(provider, model_choice, use_thinking=False):
-    """Synchronize model selection and dependent controls from one explicit code path."""
+def sync_model_capabilities(
+    provider,
+    model_choice,
+    use_thinking=False,
+    effort=None,
+    requested_temperature=None,
+    previous_control=None,
+):
+    """Synchronize model selection and dependent controls from one explicit code path.
+
+    The toggle state carries over only between toggle models; the hidden
+    checkbox of other controls does not hold a user choice.
+    """
     choices = get_model_dropdown_choices(provider)
-    settings = get_model_settings(provider, model_choice, use_thinking)
+    settings = get_model_settings(
+        provider,
+        model_choice,
+        bool(use_thinking) and previous_control == "toggle",
+        effort,
+        requested_temperature,
+    )
 
     return (
         gr.update(choices=choices, value=settings["selected_model"]),
         gr.update(
-            visible=settings["show_temperature"],
+            visible=get_temperature_visibility(settings["show_temperature"]),
             value=settings["temperature_value"],
+            interactive=settings["temperature_interactive"],
         ),
         gr.update(
             visible=settings["show_thinking"],
@@ -468,22 +567,33 @@ def sync_model_capabilities(provider, model_choice, use_thinking=False):
             value=settings["effort_value"],
             visible=settings["show_effort"],
         ),
+        settings["reasoning_control"],
     )
 
 
-def sync_controls_for_provider(provider):
-    """Reset dependent controls when the provider changes."""
-    return sync_model_capabilities(provider, None, False)
+def sync_controls_for_provider(*control_values):
+    """Refresh dependent controls when the provider changes."""
+    return sync_model_capabilities(*control_values)
 
 
-def sync_controls_for_model(provider, model_choice):
-    """Reset dependent controls when the selected model changes."""
-    return sync_model_capabilities(provider, model_choice, False)
+def sync_controls_for_model(*control_values):
+    """Refresh dependent controls when the selected model changes."""
+    return sync_model_capabilities(*control_values)
 
 
-def sync_controls_for_thinking(provider, model_choice, use_thinking):
+def sync_controls_for_thinking(*control_values):
     """Refresh dependent controls when the reasoning toggle changes."""
-    return sync_model_capabilities(provider, model_choice, use_thinking)
+    return sync_model_capabilities(*control_values)
+
+
+def sync_controls_for_effort(*control_values):
+    """Refresh dependent controls when the reasoning effort changes."""
+    return sync_model_capabilities(*control_values)
+
+
+def sync_context_size_for_provider(provider):
+    """Show Ollama's advanced settings only for Ollama; keep the selection."""
+    return gr.update(visible=provider == "Ollama")
 
 
 def get_soundfont_choices():
@@ -683,6 +793,8 @@ def run_loop(
     openai_key,
     gemini_key,
     claude_key,
+    ollama_num_ctx=None,
+    provider=None,
 ):
     """Run the loop generation process based on user inputs and selected model.
 
@@ -696,12 +808,15 @@ def run_loop(
         description (str): A description of the loop that the user input in the text box.
         temp (float): The sampling temperature for the model that the user selects from the slider.
         model_choice (str): The model that the user selects from the dropdown.
-        use_thinking (bool): Whether to enable extended thinking for supported Claude and Gemini models.
-        effort (str): The reasoning effort level for supported OpenAI models.
+        use_thinking (bool): Whether to enable extended thinking for supported models.
+        effort (str): The reasoning effort level for models with effort options.
          soundfont_choice (str): The selected SoundFont filename for audio rendering.
         openai_key (str): The OpenAI API key that the user inputs in the text box.
         gemini_key (str): The Gemini API key that the user inputs in the text box.
         claude_key (str): The Claude API key that the user inputs in the text box.
+        ollama_num_ctx (int | None): Optional Ollama context window size; 0 or None
+            keeps Ollama's default. Sent only when provider is Ollama.
+        provider (str | None): The selected provider.
 
     Yields:
          tuple: (file_path, audio_path, visualization, status_message, stop_button_update,
@@ -741,6 +856,9 @@ def run_loop(
             effort=effort,
             render_audio=True,
             soundfont_path=selected_soundfont,
+            ollama_num_ctx=int(ollama_num_ctx)
+            if provider == "Ollama" and ollama_num_ctx
+            else None,
         )
         progress_events = Queue()
 
@@ -857,16 +975,12 @@ def format_history_reasoning(gen, model_info):
 
     provider = getattr(gen, "provider", None)
     model_config = model_info["models"].get(provider, {}).get(gen.model, {})
-    effort_options = model_config.get("effort_options", [])
-    supports_toggle_reasoning = (
-        provider in {"Anthropic", "Google"}
-        and model_config.get("extended_thinking", False)
-        and not effort_options
-    )
+    reasoning_control = get_reasoning_control(model_config)
 
-    if effort_options:
-        return effort
-    if supports_toggle_reasoning:
+    if reasoning_control == "effort":
+        # use_thinking=False is "none", or the lowest level Core sends instead.
+        return effort if use_thinking else get_effort_choices(model_config)[0]
+    if reasoning_control != "none":
         return "reasoning" if use_thinking else ""
     if use_thinking:
         return "reasoning"
@@ -952,9 +1066,10 @@ def load_history_item(gen_id):
         tuple: (midi_path, audio_path, soundfont_update, visualization, status_message,
                generation_id, saved_soundfont, current_audio_path, rerender_update,
                key_update, scale_update, description_update, provider_update, model_update,
-               temperature_update, thinking_update, effort_update)
+               temperature_update, thinking_update, effort_update,
+               requested_temperature, reasoning_control)
     """
-    unchanged_controls = tuple(gr.update() for _ in range(8))
+    unchanged_controls = tuple(gr.update() for _ in range(10))
     if not gen_id:
         return (
             None,
@@ -1183,9 +1298,16 @@ def create_demo(playback_status=None):
                         with gr.Column():
                             gr.Markdown("## Generation Parameters")
                             default_provider = DEFAULT_PROVIDER
-                            default_model = DEFAULT_MODEL
+                            # No model choice selects the provider's first model,
+                            # which is its newest in Core's registry.
                             default_settings = get_model_settings(
-                                default_provider, default_model, False
+                                default_provider, None, False
+                            )
+                            # The user's last free temperature, kept while a
+                            # model shows a fixed one, and the active control.
+                            requested_temperature = gr.State(DEFAULT_TEMPERATURE)
+                            reasoning_control = gr.State(
+                                default_settings["reasoning_control"]
                             )
                             provider_input = gr.Dropdown(
                                 choices=get_providers(),
@@ -1203,7 +1325,10 @@ def create_demo(playback_status=None):
                                 step=0.1,
                                 value=default_settings["temperature_value"],
                                 label="Temperature",
-                                visible=default_settings["show_temperature"],
+                                visible=get_temperature_visibility(
+                                    default_settings["show_temperature"]
+                                ),
+                                interactive=default_settings["temperature_interactive"],
                             )
                             thinking_checkbox = gr.Checkbox(
                                 label="Reasoning",
@@ -1216,6 +1341,16 @@ def create_demo(playback_status=None):
                                 value=default_settings["effort_value"],
                                 visible=default_settings["show_effort"],
                             )
+                            with gr.Accordion(
+                                "Advanced Settings",
+                                open=False,
+                                visible=default_provider == "Ollama",
+                            ) as advanced_settings:
+                                num_ctx_input = gr.Dropdown(
+                                    choices=OLLAMA_CONTEXT_SIZE_CHOICES,
+                                    label="Ollama Context Size",
+                                    value=0,
+                                )
                     with gr.Row():
                         prog_button = gr.Button("Generate Loop", variant="primary")
                         stop_waiting_button = gr.Button(
@@ -1258,36 +1393,45 @@ def create_demo(playback_status=None):
                     )
                     error_message = gr.Textbox(label="Status", interactive=False)
 
-                    # Update model choices when provider changes
-                    provider_input.input(
-                        sync_controls_for_provider,
+                    # Every model control refreshes the dependent controls from
+                    # the current choices, so they carry over where supported.
+                    control_inputs = [
+                        provider_input,
+                        model_choice_input,
+                        thinking_checkbox,
+                        effort_input,
+                        requested_temperature,
+                        reasoning_control,
+                    ]
+                    control_outputs = [
+                        model_choice_input,
+                        temp_input,
+                        thinking_checkbox,
+                        effort_input,
+                        reasoning_control,
+                    ]
+                    for control, sync_controls in (
+                        (provider_input, sync_controls_for_provider),
+                        (model_choice_input, sync_controls_for_model),
+                        (effort_input, sync_controls_for_effort),
+                        (thinking_checkbox, sync_controls_for_thinking),
+                    ):
+                        control.input(
+                            sync_controls,
+                            inputs=control_inputs,
+                            outputs=control_outputs,
+                        )
+                    # A locked slider takes no input, so this holds the free value.
+                    temp_input.input(
+                        lambda value: value,
+                        inputs=temp_input,
+                        outputs=requested_temperature,
+                    )
+                    # .change also covers provider updates from loading history.
+                    provider_input.change(
+                        sync_context_size_for_provider,
                         inputs=provider_input,
-                        outputs=[
-                            model_choice_input,
-                            temp_input,
-                            thinking_checkbox,
-                            effort_input,
-                        ],
-                    )
-                    model_choice_input.input(
-                        sync_controls_for_model,
-                        inputs=[provider_input, model_choice_input],
-                        outputs=[
-                            model_choice_input,
-                            temp_input,
-                            thinking_checkbox,
-                            effort_input,
-                        ],
-                    )
-                    thinking_checkbox.input(
-                        sync_controls_for_thinking,
-                        inputs=[provider_input, model_choice_input, thinking_checkbox],
-                        outputs=[
-                            model_choice_input,
-                            temp_input,
-                            thinking_checkbox,
-                            effort_input,
-                        ],
+                        outputs=advanced_settings,
                     )
                     # When the user clicks the button, run the loop generation function based on the current inputs.
                     # Capture the event so the stop-waiting button can detach the UI from the in-flight request.
@@ -1305,6 +1449,8 @@ def create_demo(playback_status=None):
                             openai_key_input,
                             gemini_key_input,
                             claude_key_input,
+                            num_ctx_input,
+                            provider_input,
                         ],
                         outputs=[
                             prog_output,
@@ -1453,6 +1599,8 @@ def create_demo(playback_status=None):
                 temp_input,
                 thinking_checkbox,
                 effort_input,
+                requested_temperature,
+                reasoning_control,
             ],
         )
 

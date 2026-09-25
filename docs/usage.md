@@ -49,15 +49,18 @@ and optional audio rendering.
 
 ## Model-Specific Controls
 
-Conductor Main reads packaged model metadata and adapts its controls when the provider or model changes:
+Conductor Main reads Core's model metadata and adapts its controls when the provider or model changes. Ollama models use the capabilities Core reports for the selected model.
 
 | Control | Behavior |
 |---|---|
-| **Temperature** | Shown for models that accept sampling temperature |
-| **Reasoning** | Toggle used by supported legacy Anthropic and Google models |
-| **Reasoning Effort** | Model-specific choices such as `minimal`, `low`, `high`, or `xhigh` |
+| **Temperature** | Shown for models that accept sampling temperature. Models that require a fixed temperature while reasoning show that value, locked, while reasoning is on |
+| **Reasoning** | On/off toggle for models without effort levels that can turn reasoning off |
+| **Reasoning Effort** | Model-specific choices such as `none`, `minimal`, `low`, `high`, or `xhigh`. The selected level is always sent. `none` appears for every model that can turn reasoning off; otherwise the lowest level is the least reasoning the model allows |
+| **Ollama Context Size** | Under **Advanced Settings**, shown only for Ollama. Choose 1,024 to 262,144 tokens, or keep **Ollama default**. The selection is kept when you switch providers but is only sent to Ollama. Larger windows use more memory |
 
-Changing providers resets the model to a valid choice and refreshes dependent controls. A hidden control is intentionally unavailable for that model rather than missing from the installation.
+Models that always reason and offer no effort levels show no reasoning control.
+
+Changing providers resets the model to a valid choice and refreshes dependent controls. Your temperature carries over between models, the reasoning effort carries over when the new model offers that level, and the reasoning toggle carries over between models that have one. A hidden control is intentionally unavailable for that model rather than missing from the installation.
 
 Model labels show input and output prices per one million tokens when pricing metadata is available. The saved generation records the provider-reported cost; local Ollama generations normally have zero API cost.
 

@@ -27,7 +27,7 @@ The app opens at [http://127.0.0.1:7860/](http://127.0.0.1:7860/).
 - Natural-language four-bar MIDI loop generation across multiple LLM providers (OpenAI, Anthropic, Google, Ollama).
 - Interactive Plotly piano roll visualization and MIDI download for DAW import.
 - Built-in looping audio rendering and playback via FluidSynth and SoundFonts.
-- Model-adaptive controls (temperature, reasoning toggles, reasoning effort).
+- Model-adaptive controls (temperature, reasoning toggles, reasoning effort, Ollama context size).
 - Session history with generation reload and audio re-rendering.
 - Customizable prompt overrides.
 

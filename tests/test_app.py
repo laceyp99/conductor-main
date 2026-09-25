@@ -398,18 +398,19 @@ def test_history_controls_use_defaults_and_warn_for_legacy_reasoning(monkeypatch
     assert updates.warnings == ("Reasoning settings weren't saved; defaults applied.",)
 
 
-def test_history_controls_preserve_unavailable_provider_and_model_without_discovery(
+def test_history_controls_restore_installed_ollama_without_false_unavailable(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        app,
-        "get_model_info",
-        lambda: {"models": {"OpenAI": {"current-model": {}}}},
+        app, "get_model_info", lambda: {"models": {"OpenAI": {"current-model": {}}}}
     )
     monkeypatch.setattr(
         app.ollama_api,
         "get_ollama_status",
-        lambda: (_ for _ in ()).throw(AssertionError("must not discover Ollama")),
+        lambda request_timeout: {
+            "available": True,
+            "models": ["gemma4:e4b", "other:latest"],
+        },
     )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
@@ -419,22 +420,99 @@ def test_history_controls_preserve_unavailable_provider_and_model_without_discov
             scale="Major",
             prompt="local history",
             provider="Ollama",
-            model="retired-local-model",
+            model="gemma4:e4b",
             temperature=0.5,
             use_thinking=True,
             effort="medium",
         )
     )
 
+    assert updates.provider == {"choices": ["OpenAI", "Ollama"], "value": "Ollama"}
+    assert updates.model == {
+        "choices": [("gemma4:e4b", "gemma4:e4b"), ("other:latest", "other:latest")],
+        "value": "gemma4:e4b",
+    }
+    assert updates.temperature == {"visible": True, "value": 0.5}
+    assert updates.use_thinking == {"visible": False, "value": False}
+    assert updates.effort == {"choices": ["low"], "value": "low", "visible": False}
+    assert updates.warnings == (
+        "Saved Ollama reasoning is not supported by this Core version.",
+    )
+
+
+def test_history_controls_mark_missing_ollama_model_only(monkeypatch):
+    monkeypatch.setattr(
+        app, "get_model_info", lambda: {"models": {"OpenAI": {"current-model": {}}}}
+    )
+    monkeypatch.setattr(
+        app.ollama_api,
+        "get_ollama_status",
+        lambda request_timeout: {"available": True, "models": ["other:latest"]},
+    )
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    updates = app.get_history_control_updates(
+        SimpleNamespace(
+            key="C",
+            scale="Major",
+            prompt="local",
+            provider="Ollama",
+            model="missing:latest",
+            temperature=0.5,
+            use_thinking=False,
+            effort="low",
+        )
+    )
+
+    assert updates.provider["choices"][-1] == "Ollama"
+    assert updates.model["choices"][-1] == (
+        "missing:latest (unavailable)",
+        "missing:latest",
+    )
+    assert updates.use_thinking["visible"] is False
+    assert updates.effort["visible"] is False
+    assert updates.warnings == ("Unavailable selection: Ollama / missing:latest.",)
+
+
+def test_history_controls_preserve_ollama_when_service_unreachable(monkeypatch):
+    monkeypatch.setattr(
+        app, "get_model_info", lambda: {"models": {"OpenAI": {"current-model": {}}}}
+    )
+    monkeypatch.setattr(
+        app.ollama_api,
+        "get_ollama_status",
+        lambda request_timeout: {"available": False, "models": []},
+    )
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    updates = app.get_history_control_updates(
+        SimpleNamespace(
+            key="C",
+            scale="Major",
+            prompt="local",
+            provider="Ollama",
+            model="gemma4:e4b",
+            temperature=0.5,
+            use_thinking=False,
+            effort="low",
+        )
+    )
+
     assert updates.provider["choices"][-1] == ("Ollama (unavailable)", "Ollama")
-    assert updates.provider["value"] == "Ollama"
-    assert updates.model["choices"] == [
-        ("retired-local-model (unavailable)", "retired-local-model")
-    ]
-    assert updates.model["value"] == "retired-local-model"
-    assert updates.use_thinking["value"] is True
-    assert updates.effort["value"] == "medium"
-    assert updates.warnings == ("Unavailable selection: Ollama / retired-local-model.",)
+    assert updates.model["choices"] == [("gemma4:e4b (unavailable)", "gemma4:e4b")]
+    assert updates.use_thinking["visible"] is False
+    assert updates.effort["visible"] is False
+    assert updates.warnings == ("Unavailable selection: Ollama / gemma4:e4b.",)
+
+
+def test_ollama_model_settings_only_show_supported_pinned_core_controls(monkeypatch):
+    monkeypatch.setattr(app, "get_models_for_provider", lambda provider: ["gemma4:e4b"])
+    settings = app.get_model_settings("Ollama", "gemma4:e4b", True)
+
+    assert settings["selected_model"] == "gemma4:e4b"
+    assert settings["show_temperature"] is True
+    assert settings["show_thinking"] is False
+    assert settings["show_effort"] is False
 
 
 def test_history_store_uses_the_app_retention_policy():

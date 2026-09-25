@@ -253,7 +253,7 @@ class HistoryControlUpdates:
 
 
 def get_history_control_updates(gen):
-    """Build form updates without provider discovery or live service calls."""
+    """Build form updates, checking saved Ollama models against local discovery."""
     model_info = get_model_info()
     known_models = model_info["models"]
     provider = gen.provider
@@ -267,12 +267,23 @@ def get_history_control_updates(gen):
         key_update = gr.update(value=ui_key)
 
     provider_choices = list(known_models)
-    provider_is_available = provider in known_models
+    ollama_status = (
+        ollama_api.get_ollama_status(request_timeout=3.0)
+        if provider == "Ollama"
+        else None
+    )
+    if ollama_status and ollama_status["available"]:
+        provider_choices.append("Ollama")
+    provider_is_available = provider in known_models or bool(
+        ollama_status and ollama_status["available"]
+    )
     if not provider_is_available:
         provider_choices.append((f"{provider} (unavailable)", provider))
 
     if provider_is_available:
-        provider_models = known_models[provider]
+        provider_models = (
+            ollama_status["models"] if provider == "Ollama" else known_models[provider]
+        )
         model_choices = [
             (format_model_label(provider, model_name), model_name)
             for model_name in provider_models
@@ -291,7 +302,13 @@ def get_history_control_updates(gen):
     reasoning_was_recorded = saved_thinking is not None and saved_effort is not None
 
     if model_is_available:
-        settings = get_model_settings(provider, model, bool(saved_thinking))
+        settings = (
+            get_ollama_model_settings(model)
+            if provider == "Ollama"
+            else get_model_settings(provider, model, bool(saved_thinking))
+        )
+    elif provider == "Ollama":
+        settings = get_ollama_model_settings(model)
     else:
         settings = {
             "show_temperature": True,
@@ -303,13 +320,21 @@ def get_history_control_updates(gen):
             "show_effort": True,
         }
 
-    if not reasoning_was_recorded:
+    if provider == "Ollama" and (saved_thinking or saved_effort not in (None, "low")):
+        warnings.append("Saved Ollama reasoning is not supported by this Core version.")
+    elif provider != "Ollama" and not reasoning_was_recorded:
         warnings.append("Reasoning settings weren't saved; defaults applied.")
 
     thinking_value = (
-        saved_thinking if reasoning_was_recorded else settings["thinking_value"]
+        saved_thinking
+        if reasoning_was_recorded and provider != "Ollama"
+        else settings["thinking_value"]
     )
-    effort_value = saved_effort if reasoning_was_recorded else settings["effort_value"]
+    effort_value = (
+        saved_effort
+        if reasoning_was_recorded and provider != "Ollama"
+        else settings["effort_value"]
+    )
     effort_options = list(settings["effort_options"])
     if effort_value not in effort_options:
         effort_options.append(effort_value)
@@ -375,10 +400,26 @@ def get_selected_model(provider, model_choice):
     return models[0] if models else None
 
 
+def get_ollama_model_settings(selected_model):
+    """Expose only controls that pinned Core can pass through to Ollama."""
+    return {
+        "selected_model": selected_model,
+        "show_temperature": True,
+        "temperature_value": 0.1,
+        "show_thinking": False,
+        "thinking_value": False,
+        "effort_options": [],
+        "effort_value": "low",
+        "show_effort": False,
+    }
+
+
 def get_model_settings(provider, model_choice, use_thinking=False):
     """Resolve the provider/model UI settings for dependent controls."""
     selected_model = get_selected_model(provider, model_choice)
-    if not selected_model or provider == "Ollama":
+    if provider == "Ollama":
+        return get_ollama_model_settings(selected_model)
+    if not selected_model:
         return {
             "selected_model": selected_model,
             "show_temperature": True,

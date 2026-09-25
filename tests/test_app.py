@@ -1500,6 +1500,22 @@ def test_history_load_callback_updates_all_parameter_controls_once():
     assert len(dependency["outputs"]) == len(set(dependency["outputs"]))
 
 
+def test_provider_sync_does_not_send_the_stale_model_choice():
+    demo = app.create_demo(playback_status=(True, None))
+    labels = {
+        component["id"]: component["props"].get("label")
+        for component in demo.config["components"]
+    }
+    dependency = next(
+        dependency
+        for dependency in demo.config["dependencies"]
+        if dependency["api_name"] == "sync_controls_for_provider"
+    )
+
+    # Gradio rejects a dropdown value missing from its current choices.
+    assert "Model" not in [labels.get(component) for component in dependency["inputs"]]
+
+
 def test_model_sync_callbacks_only_run_for_user_input():
     demo = app.create_demo(playback_status=(True, None))
     sync_api_names = {

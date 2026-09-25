@@ -571,9 +571,13 @@ def sync_model_capabilities(
     )
 
 
-def sync_controls_for_provider(*control_values):
-    """Refresh dependent controls when the provider changes."""
-    return sync_model_capabilities(*control_values)
+def sync_controls_for_provider(provider, *control_values):
+    """Refresh dependent controls when the provider changes.
+
+    The model dropdown is not an input: Gradio rejects its previous value
+    once its choices belong to another provider, so the first model is used.
+    """
+    return sync_model_capabilities(provider, None, *control_values)
 
 
 def sync_controls_for_model(*control_values):
@@ -1410,8 +1414,16 @@ def create_demo(playback_status=None):
                         effort_input,
                         reasoning_control,
                     ]
+                    provider_input.input(
+                        sync_controls_for_provider,
+                        inputs=[
+                            control
+                            for control in control_inputs
+                            if control is not model_choice_input
+                        ],
+                        outputs=control_outputs,
+                    )
                     for control, sync_controls in (
-                        (provider_input, sync_controls_for_provider),
                         (model_choice_input, sync_controls_for_model),
                         (effort_input, sync_controls_for_effort),
                         (thinking_checkbox, sync_controls_for_thinking),

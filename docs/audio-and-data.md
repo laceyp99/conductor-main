@@ -79,4 +79,4 @@ By default, the app keeps the newest 20 generations under its data directory:
 
 Loading history restores its MIDI, saved audio, visualization, generation ID, SoundFont metadata, loop parameters, provider, model, temperature, and reasoning controls. The restored controls remain editable, so a historical setup can be adjusted before generating again.
 
-Older history entries that did not record reasoning settings use the current model defaults and show a warning. Saved providers or models that are no longer available remain visible with an unavailable label instead of being silently replaced. Missing SoundFonts are also identified while saved audio remains available.
+Older history entries that did not record reasoning settings use the current model defaults and show a warning. Entries recorded with reasoning off on a model with effort levels restore that model's lowest level, which is what was sent. Saved providers or models that are no longer available remain visible with an unavailable label instead of being silently replaced. Missing SoundFonts are also identified while saved audio remains available.

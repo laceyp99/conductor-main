@@ -24,6 +24,10 @@ The package entry point is `conductor_main.app:main`. UI-specific visualization 
 - Enter the key in the API Keys accordion or set the environment variable.
 - For Ollama, confirm the server is running and has at least one model installed.
 
+### An Ollama model ran out of context
+
+The prompt and response filled the model's context window. Lower or turn off reasoning, pick a model with a larger context, or set **Advanced Settings > Ollama Context Size** to a larger value your machine can load.
+
 ### MIDI works but playback is empty
 
 Check FluidSynth, FFmpeg, and SoundFont availability. This is an optional audio failure, not a failed MIDI generation.

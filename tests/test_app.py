@@ -106,6 +106,7 @@ def test_run_loop_passes_ui_configuration_to_core(monkeypatch, tmp_path):
     assert captured["config"].default_soundfont_path == "custom.sf2"
     assert captured["config"].max_generations == app.MAX_HISTORY_GENERATIONS
     assert captured["request"].effort == "low"
+    assert captured["request"].ollama_num_ctx is None
     assert captured["request"].render_audio is True
     assert captured["request"].soundfont_path == "custom.sf2"
     assert captured["request"].description == "warm rhodes loop"
@@ -213,11 +214,13 @@ def test_get_selected_soundfont_prefers_requested_choice(monkeypatch):
     assert selected_soundfont == "custom.sf2"
 
 
-def test_default_model_exists_in_model_metadata():
+def test_default_model_is_the_newest_default_provider_model():
     model_info = app.get_model_info()
+    newest_model = next(iter(model_info["models"][app.DEFAULT_PROVIDER]))
 
-    assert app.DEFAULT_PROVIDER in model_info["models"]
-    assert app.DEFAULT_MODEL in model_info["models"][app.DEFAULT_PROVIDER]
+    settings = app.get_model_settings(app.DEFAULT_PROVIDER, None)
+
+    assert settings["selected_model"] == newest_model
 
 
 def test_core_legacy_generation_metadata_defaults_reasoning_to_none():
@@ -247,9 +250,386 @@ def test_model_settings_use_core_supported_effort_values():
             effort_options = metadata.get("effort_options", [])
             if effort_options:
                 settings = app.get_model_settings(provider, model)
+                adds_none = (
+                    metadata.get("thinking_off") == "disabled"
+                    and "none" not in effort_options
+                )
 
-                assert settings["effort_options"] == effort_options
-                assert settings["effort_value"] in effort_options
+                assert settings["effort_options"] == (
+                    ["none", *effort_options] if adds_none else effort_options
+                )
+                assert settings["effort_value"] == settings["effort_options"][0]
+
+
+def test_model_settings_follow_core_reasoning_and_temperature_metadata():
+    model_info = app.get_model_info()
+
+    for provider, models in model_info["models"].items():
+        for model, metadata in models.items():
+            settings = app.get_model_settings(provider, model)
+            thinking = metadata.get("extended_thinking", False)
+            effort_options = metadata.get("effort_options") or []
+            toggles = (
+                thinking
+                and not effort_options
+                and metadata.get("thinking_off") == "disabled"
+            )
+
+            assert settings["show_effort"] == bool(thinking and effort_options)
+            assert settings["show_thinking"] == toggles
+            added_none = settings["effort_value"] == "none" and "none" not in (
+                effort_options
+            )
+            # Only the toggle and the "none" Main adds send use_thinking=False.
+            assert settings["thinking_value"] == (
+                thinking and not toggles and not added_none
+            )
+            assert settings["show_temperature"] == metadata.get(
+                "temperature_supported", True
+            )
+
+
+def test_model_settings_hide_reasoning_for_always_on_models_without_levels(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        app,
+        "get_model_info",
+        lambda: {
+            "models": {
+                "Google": {
+                    "always-on": {
+                        "extended_thinking": True,
+                        "thinking_off": "lowest_effort",
+                    }
+                }
+            }
+        },
+    )
+
+    settings = app.get_model_settings("Google", "always-on")
+
+    assert settings["show_thinking"] is False
+    assert settings["show_effort"] is False
+    assert settings["thinking_value"] is True
+
+
+def test_model_settings_show_fixed_temperature_only_while_thinking(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_model_info",
+        lambda: {
+            "models": {
+                "Anthropic": {
+                    "toggle-model": {
+                        "extended_thinking": True,
+                        "thinking_off": "disabled",
+                        "thinking_fixed_temperature": 1.0,
+                    }
+                }
+            }
+        },
+    )
+
+    thinking = app.get_model_settings("Anthropic", "toggle-model", True)
+    not_thinking = app.get_model_settings("Anthropic", "toggle-model", False)
+
+    assert thinking["show_temperature"] is True
+    assert thinking["temperature_value"] == 1.0
+    assert thinking["temperature_interactive"] is False
+    assert not_thinking["temperature_value"] == 0.1
+    assert not_thinking["temperature_interactive"] is True
+
+
+def test_effort_models_that_can_disable_thinking_offer_none(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_model_info",
+        lambda: {
+            "models": {
+                "Anthropic": {
+                    "adaptive-model": {
+                        "extended_thinking": True,
+                        "effort_options": ["low", "high"],
+                        "thinking_off": "disabled",
+                        "thinking_fixed_temperature": 1.0,
+                    },
+                    "always-on-model": {
+                        "extended_thinking": True,
+                        "effort_options": ["low", "high"],
+                        "thinking_off": "lowest_effort",
+                    },
+                }
+            }
+        },
+    )
+
+    off = app.get_model_settings("Anthropic", "adaptive-model")
+    high = app.get_model_settings("Anthropic", "adaptive-model", effort="high")
+    always_on = app.get_model_settings("Anthropic", "always-on-model")
+
+    assert off["effort_options"] == ["none", "low", "high"]
+    assert off["effort_value"] == "none"
+    assert off["thinking_value"] is False
+    assert off["temperature_interactive"] is True
+    assert high["thinking_value"] is True
+    assert high["temperature_value"] == 1.0
+    assert high["temperature_interactive"] is False
+    assert always_on["effort_options"] == ["low", "high"]
+    assert always_on["thinking_value"] is True
+
+
+def test_effort_sync_locks_fixed_temperature_and_keeps_slider_mounted(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_model_info",
+        lambda: {
+            "models": {
+                "Anthropic": {
+                    "adaptive-model": {
+                        "extended_thinking": True,
+                        "effort_options": ["low", "high"],
+                        "thinking_off": "disabled",
+                        "thinking_fixed_temperature": 1.0,
+                    },
+                    "no-temperature-model": {
+                        "extended_thinking": True,
+                        "effort_options": ["low", "high"],
+                        "thinking_off": "lowest_effort",
+                        "temperature_supported": False,
+                    },
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    _, temperature, thinking, effort, _ = app.sync_controls_for_effort(
+        "Anthropic", "adaptive-model", False, "high", 0.4, "effort"
+    )
+    _, off_temperature, off_thinking, _, _ = app.sync_controls_for_effort(
+        "Anthropic", "adaptive-model", True, "none", 0.4, "effort"
+    )
+    _, hidden_temperature, _, _, _ = app.sync_controls_for_model(
+        "Anthropic", "no-temperature-model", False, "none", 0.4, "effort"
+    )
+
+    assert temperature == {"visible": True, "value": 1.0, "interactive": False}
+    assert thinking["value"] is True
+    assert effort["value"] == "high"
+    # Unlocking restores the user's requested temperature, not a default.
+    assert off_temperature == {"visible": True, "value": 0.4, "interactive": True}
+    assert off_thinking["value"] is False
+    assert hidden_temperature["visible"] == "hidden"
+
+
+def test_model_switch_keeps_temperature_effort_and_toggle_choices(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_model_info",
+        lambda: {
+            "models": {
+                "Google": {
+                    "effort-a": {
+                        "extended_thinking": True,
+                        "effort_options": ["low", "medium", "high"],
+                        "thinking_off": "lowest_effort",
+                    },
+                    "effort-b": {
+                        "extended_thinking": True,
+                        "effort_options": ["low", "high"],
+                        "thinking_off": "lowest_effort",
+                    },
+                    "toggle-a": {
+                        "extended_thinking": True,
+                        "thinking_off": "disabled",
+                    },
+                    "toggle-b": {
+                        "extended_thinking": True,
+                        "thinking_off": "disabled",
+                    },
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    _, temperature, _, effort, control = app.sync_controls_for_model(
+        "Google", "effort-b", True, "high", 0.6, "effort"
+    )
+    _, _, _, missing_effort, _ = app.sync_controls_for_model(
+        "Google", "effort-b", True, "medium", 0.6, "effort"
+    )
+    _, _, toggle_kept, _, _ = app.sync_controls_for_model(
+        "Google", "toggle-b", True, "low", 0.6, "toggle"
+    )
+    # An effort model's hidden checkbox is True; it must not switch reasoning on.
+    _, _, toggle_from_effort, _, _ = app.sync_controls_for_model(
+        "Google", "toggle-a", True, "high", 0.6, "effort"
+    )
+
+    assert temperature["value"] == 0.6
+    assert effort["value"] == "high"
+    assert control == "effort"
+    assert missing_effort["value"] == "low"
+    assert toggle_kept["value"] is True
+    assert toggle_from_effort["value"] is False
+
+
+def test_provider_none_effort_keeps_thinking_on_for_core(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_model_info",
+        lambda: {
+            "models": {
+                "OpenAI": {
+                    "openai-model": {
+                        "extended_thinking": True,
+                        "effort_options": ["none", "low"],
+                        "thinking_off": "disabled",
+                        "temperature_supported": False,
+                    }
+                }
+            }
+        },
+    )
+
+    settings = app.get_model_settings("OpenAI", "openai-model", effort="none")
+
+    # Core's own "none" is an effort level, sent with use_thinking=True.
+    assert settings["effort_value"] == "none"
+    assert settings["thinking_value"] is True
+
+
+def test_model_settings_inspect_only_the_selected_ollama_model(monkeypatch):
+    inspected = []
+    monkeypatch.setattr(app.ollama_api, "get_model_list", lambda: ["gpt-oss", "qwen3"])
+
+    def get_model_status(model):
+        inspected.append(model)
+        return {
+            "model_capabilities": {
+                "extended_thinking": True,
+                "effort_options": ["low", "medium", "high"],
+                "temperature_supported": True,
+                "thinking_fixed_temperature": None,
+                "thinking_off": "lowest_effort",
+            }
+        }
+
+    monkeypatch.setattr(app.ollama_api, "get_model_status", get_model_status)
+
+    settings = app.get_model_settings("Ollama", "gpt-oss")
+
+    assert inspected == ["gpt-oss"]
+    assert settings["show_effort"] is True
+    assert settings["effort_options"] == ["low", "medium", "high"]
+    assert settings["thinking_value"] is True
+    assert settings["show_temperature"] is True
+
+
+def test_model_settings_show_no_reasoning_for_uninspectable_ollama_model(
+    monkeypatch,
+):
+    monkeypatch.setattr(app.ollama_api, "get_model_list", lambda: ["llama3"])
+    monkeypatch.setattr(
+        app.ollama_api,
+        "get_model_status",
+        lambda model: {"model_capabilities": None},
+    )
+
+    settings = app.get_model_settings("Ollama", "llama3")
+
+    assert settings["show_thinking"] is False
+    assert settings["show_effort"] is False
+    assert settings["thinking_value"] is False
+    assert settings["show_temperature"] is True
+
+
+def test_get_providers_does_not_inspect_every_ollama_model(monkeypatch):
+    monkeypatch.setattr(app.ollama_api, "get_model_list", lambda: ["llama3"])
+    monkeypatch.setattr(
+        app.ollama_api,
+        "get_ollama_status",
+        lambda: (_ for _ in ()).throw(AssertionError("must not inspect models")),
+    )
+
+    assert app.get_providers()[-1] == "Ollama"
+
+
+def test_context_size_is_only_shown_for_ollama(monkeypatch):
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    assert app.sync_context_size_for_provider("Ollama") == {"visible": True}
+    # The selection is kept; run_loop only sends it for Ollama.
+    assert app.sync_context_size_for_provider("OpenAI") == {"visible": False}
+
+
+def test_run_loop_passes_ollama_context_size_to_core(monkeypatch, tmp_path):
+    captured = {}
+    midi_path = _write_binary_file(tmp_path / "loop.mid")
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+    monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: None)
+    monkeypatch.setattr(app, "MidiFile", lambda path: "midi")
+    monkeypatch.setattr(app, "visualize_midi_plotly", lambda midi: "viz")
+
+    class FakeEngine:
+        def __init__(self, config):
+            pass
+
+        def generate(self, request, progress_callback=None):
+            captured["request"] = request
+            return SimpleNamespace(
+                midi_path=str(midi_path),
+                audio_path=None,
+                cost=0,
+                generation_id="fixed_id",
+                metadata=SimpleNamespace(soundfont=None),
+                warnings=[],
+            )
+
+    monkeypatch.setattr(app, "LoopGenerationEngine", FakeEngine)
+
+    list(
+        app.run_loop(
+            key="C",
+            scale="Major",
+            description="local loop",
+            temp=0.3,
+            model_choice="llama3",
+            use_thinking=False,
+            effort="low",
+            soundfont_choice=None,
+            openai_key="",
+            gemini_key="",
+            claude_key="",
+            ollama_num_ctx=8192.0,
+            provider="Ollama",
+        )
+    )
+
+    assert captured["request"].ollama_num_ctx == 8192
+    assert isinstance(captured["request"].ollama_num_ctx, int)
+
+    list(
+        app.run_loop(
+            key="C",
+            scale="Major",
+            description="cloud loop",
+            temp=0.3,
+            model_choice="gpt-test",
+            use_thinking=False,
+            effort="low",
+            soundfont_choice=None,
+            openai_key="",
+            gemini_key="",
+            claude_key="",
+            ollama_num_ctx=8192,
+            provider="OpenAI",
+        )
+    )
+
+    assert captured["request"].ollama_num_ctx is None
 
 
 def test_history_controls_restore_known_effort_model_exactly(monkeypatch):
@@ -262,6 +642,8 @@ def test_history_controls_restore_known_effort_model_exactly(monkeypatch):
                     "reasoning-model": {
                         "extended_thinking": True,
                         "effort_options": ["low", "medium", "high"],
+                        "thinking_off": "lowest_effort",
+                        "temperature_supported": False,
                     }
                 }
             }
@@ -277,7 +659,7 @@ def test_history_controls_restore_known_effort_model_exactly(monkeypatch):
             provider="OpenAI",
             model="reasoning-model",
             temperature=0.7,
-            use_thinking=False,
+            use_thinking=True,
             effort="high",
         )
     )
@@ -287,13 +669,57 @@ def test_history_controls_restore_known_effort_model_exactly(monkeypatch):
     assert updates.description == {"value": "restored prompt"}
     assert updates.provider["value"] == "OpenAI"
     assert updates.model["value"] == "reasoning-model"
-    assert updates.temperature == {"visible": False, "value": 0.7}
-    assert updates.use_thinking == {"visible": False, "value": False}
+    assert updates.temperature == {
+        "visible": "hidden",
+        "value": 0.7,
+        "interactive": True,
+    }
+    assert updates.use_thinking == {"visible": False, "value": True}
     assert updates.effort == {
         "choices": ["low", "medium", "high"],
         "value": "high",
         "visible": True,
     }
+    assert updates.warnings == ()
+
+
+def test_history_controls_restore_thinking_off_effort_record_as_lowest_level(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        app,
+        "get_model_info",
+        lambda: {
+            "models": {
+                "OpenAI": {
+                    "reasoning-model": {
+                        "extended_thinking": True,
+                        "effort_options": ["none", "low", "high"],
+                        "thinking_off": "disabled",
+                    }
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    updates = app.get_history_control_updates(
+        SimpleNamespace(
+            key="C",
+            scale="Major",
+            prompt="older generation",
+            provider="OpenAI",
+            model="reasoning-model",
+            temperature=0.1,
+            use_thinking=False,
+            effort="high",
+        )
+    )
+
+    assert updates.use_thinking == {"visible": False, "value": True}
+    assert updates.effort["value"] == "none"
+    assert updates.requested_temperature == 0.1
+    assert updates.reasoning_control == "effort"
     assert updates.warnings == ()
 
 
@@ -340,7 +766,11 @@ def test_history_controls_restore_known_toggle_model_exactly(monkeypatch):
         lambda: {
             "models": {
                 "Anthropic": {
-                    "toggle-model": {"extended_thinking": True, "effort_options": []}
+                    "toggle-model": {
+                        "extended_thinking": True,
+                        "thinking_off": "disabled",
+                        "thinking_fixed_temperature": 1.0,
+                    }
                 }
             }
         },
@@ -360,7 +790,11 @@ def test_history_controls_restore_known_toggle_model_exactly(monkeypatch):
         )
     )
 
-    assert updates.temperature == {"visible": False, "value": 0.4}
+    assert updates.temperature == {
+        "visible": True,
+        "value": 1.0,
+        "interactive": False,
+    }
     assert updates.use_thinking == {"visible": True, "value": True}
     assert updates.effort == {"choices": ["low"], "value": "low", "visible": False}
     assert updates.warnings == ()
@@ -410,6 +844,11 @@ def test_history_controls_preserve_unavailable_provider_and_model_without_discov
         app.ollama_api,
         "get_ollama_status",
         lambda: (_ for _ in ()).throw(AssertionError("must not discover Ollama")),
+    )
+    monkeypatch.setattr(
+        app.ollama_api,
+        "get_model_status",
+        lambda model: (_ for _ in ()).throw(AssertionError("must not inspect Ollama")),
     )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
@@ -549,6 +988,7 @@ def test_rerender_current_audio_reports_core_rendering_error(monkeypatch, tmp_pa
 def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tmp_path):
     midi_path = _write_binary_file(tmp_path / "loop.mid")
     audio_path = _write_binary_file(tmp_path / "loop.mp3")
+    google_model = next(iter(app.get_model_info()["models"]["Google"]))
 
     monkeypatch.setattr(
         app, "get_soundfont_choices", lambda: ["FM-Piano1 20190916.sf2", "new.sf2"]
@@ -570,7 +1010,7 @@ def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tm
             scale="minor",
             prompt="saved prompt",
             provider="Google",
-            model=app.DEFAULT_MODEL,
+            model=google_model,
             temperature=0.6,
             use_thinking=False,
             effort="low",
@@ -601,6 +1041,8 @@ def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tm
         temperature_update,
         thinking_update,
         effort_update,
+        requested_temperature,
+        reasoning_control,
     ) = app.load_history_item("gen_1")
 
     assert loaded_midi_path == str(midi_path)
@@ -616,10 +1058,12 @@ def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tm
     assert scale_update["value"] == "minor"
     assert description_update["value"] == "saved prompt"
     assert provider_update["value"] == "Google"
-    assert model_update["value"] == app.DEFAULT_MODEL
+    assert model_update["value"] == google_model
     assert temperature_update["value"] == 0.6
-    assert thinking_update["value"] is False
-    assert effort_update["value"] == "low"
+    assert thinking_update["value"] is True
+    assert effort_update["value"] == effort_update["choices"][0]
+    assert requested_temperature == 0.6
+    assert reasoning_control == "effort"
 
 
 def test_load_history_item_error_paths_preserve_parameter_controls(
@@ -647,8 +1091,8 @@ def test_load_history_item_error_paths_preserve_parameter_controls(
     missing_midi = app.load_history_item("missing-midi")
 
     for result in (no_selection, not_found, missing_midi):
-        assert len(result) == 17
-        assert result[-8:] == ({}, {}, {}, {}, {}, {}, {}, {})
+        assert len(result) == 19
+        assert result[-10:] == ({},) * 10
 
 
 def test_refresh_soundfont_controls_updates_dropdown_choices(monkeypatch):
@@ -836,7 +1280,16 @@ def test_render_history_html_pairs_model_with_reasoning_details(monkeypatch):
                     "effort-model": {
                         "extended_thinking": True,
                         "effort_options": ["low", "medium", "high", "xhigh"],
-                    }
+                    },
+                    "effort-off-model": {
+                        "extended_thinking": True,
+                        "effort_options": ["none", "low", "high"],
+                    },
+                    "adaptive-off-model": {
+                        "extended_thinking": True,
+                        "effort_options": ["low", "high"],
+                        "thinking_off": "disabled",
+                    },
                 },
                 "Anthropic": {
                     "toggle-model": {
@@ -863,8 +1316,24 @@ def test_render_history_html_pairs_model_with_reasoning_details(monkeypatch):
                 id="effort",
                 provider="OpenAI",
                 model="effort-model",
-                use_thinking=False,
+                use_thinking=True,
                 effort="xhigh",
+            ),
+            SimpleNamespace(
+                **history_defaults,
+                id="effort-off",
+                provider="OpenAI",
+                model="effort-off-model",
+                use_thinking=False,
+                effort="high",
+            ),
+            SimpleNamespace(
+                **history_defaults,
+                id="adaptive-off",
+                provider="OpenAI",
+                model="adaptive-off-model",
+                use_thinking=False,
+                effort="none",
             ),
             SimpleNamespace(
                 **history_defaults,
@@ -896,6 +1365,8 @@ def test_render_history_html_pairs_model_with_reasoning_details(monkeypatch):
     rendered_history = app.render_history_html()
 
     assert "effort-model (xhigh)" in rendered_history
+    assert "effort-off-model (none)" in rendered_history
+    assert "adaptive-off-model (none)" in rendered_history
     assert "toggle-model (reasoning)" in rendered_history
     assert "legacy-model (" not in rendered_history
     assert "toggle-off-model (" not in rendered_history
@@ -1013,7 +1484,7 @@ def test_history_load_callback_updates_all_parameter_controls_once():
     }
     restored_labels = [
         components_by_id[component_id]["props"].get("label")
-        for component_id in dependency["outputs"][-8:]
+        for component_id in dependency["outputs"][-10:-2]
     ]
 
     assert restored_labels == [
@@ -1029,12 +1500,29 @@ def test_history_load_callback_updates_all_parameter_controls_once():
     assert len(dependency["outputs"]) == len(set(dependency["outputs"]))
 
 
+def test_provider_sync_does_not_send_the_stale_model_choice():
+    demo = app.create_demo(playback_status=(True, None))
+    labels = {
+        component["id"]: component["props"].get("label")
+        for component in demo.config["components"]
+    }
+    dependency = next(
+        dependency
+        for dependency in demo.config["dependencies"]
+        if dependency["api_name"] == "sync_controls_for_provider"
+    )
+
+    # Gradio rejects a dropdown value missing from its current choices.
+    assert "Model" not in [labels.get(component) for component in dependency["inputs"]]
+
+
 def test_model_sync_callbacks_only_run_for_user_input():
     demo = app.create_demo(playback_status=(True, None))
     sync_api_names = {
         "sync_controls_for_provider",
         "sync_controls_for_model",
         "sync_controls_for_thinking",
+        "sync_controls_for_effort",
     }
     sync_dependencies = [
         dependency

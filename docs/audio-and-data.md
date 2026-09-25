@@ -80,3 +80,5 @@ By default, the app keeps the newest 20 generations under its data directory:
 Loading history restores its MIDI, saved audio, visualization, generation ID, SoundFont metadata, loop parameters, provider, model, temperature, and reasoning controls. The restored controls remain editable, so a historical setup can be adjusted before generating again.
 
 Older history entries that did not record reasoning settings use the current model defaults and show a warning. Saved providers or models that are no longer available remain visible with an unavailable label instead of being silently replaced. Missing SoundFonts are also identified while saved audio remains available.
+
+For Ollama history, the app checks the local service before marking the saved provider or model unavailable. The current pinned Core sends temperature to Ollama but does not route Ollama reasoning settings, so those controls stay hidden. If an older saved Ollama item contains reasoning settings, the app warns that they cannot be restored with this Core version.

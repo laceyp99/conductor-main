@@ -726,33 +726,61 @@ def test_get_rerender_button_update_requires_active_midi(monkeypatch):
     assert rerender_update["interactive"] is False
 
 
-def test_delete_history_item_disables_rerender_for_deleted_loaded_generation(
+def test_history_choices_show_context_in_newest_first_order(monkeypatch):
+    from datetime import datetime, timezone
+
+    entries = [
+        SimpleNamespace(
+            id=identifier,
+            timestamp=datetime(2026, 1, day, 12, 0, tzinfo=timezone.utc),
+            prompt="similar prompt " + identifier,
+            key="C",
+            scale="Major",
+            model="model-a",
+            provider="OpenAI",
+            use_thinking=None,
+            effort=None,
+        )
+        for identifier, day in [("new", 2), ("old", 1)]
+    ]
+    monkeypatch.setattr(app, "load_history", lambda: entries)
+    choices = app.get_history_choices()
+
+    assert [value for _, value in choices] == ["new", "old"]
+    assert "C Major" in choices[0][0]
+    assert "similar prompt new" in choices[0][0]
+    assert "model-a" in choices[0][0]
+    assert "Jan 02" in choices[0][0]
+
+
+def test_refresh_history_preserves_only_existing_selection(monkeypatch):
+    monkeypatch.setattr(app, "get_history_choices", lambda: [("first", "gen_1")])
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    assert app.refresh_history("gen_1")["value"] == "gen_1"
+    assert app.refresh_history("missing")["value"] is None
+    assert app.toggle_history_sidebar(False, "gen_1")[-1]["value"] == "gen_1"
+
+
+def test_delete_requires_confirmation_and_clears_loaded_artifacts(
     monkeypatch, tmp_path
 ):
     midi_path = _write_binary_file(tmp_path / "loop.mid")
     audio_path = _write_binary_file(tmp_path / "loop.mp3")
-
-    monkeypatch.setattr(app, "delete_generation", lambda gen_id: True)
-    monkeypatch.setattr(app, "get_history_choices", lambda: ["gen_2"])
-    monkeypatch.setattr(app, "render_history_html", lambda: "<div>history</div>")
+    deleted = []
+    monkeypatch.setattr(
+        app, "delete_generation", lambda gen_id: deleted.append(gen_id) or True
+    )
+    monkeypatch.setattr(app, "get_history_choices", lambda: [("remaining", "gen_2")])
     monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "new.sf2")
     monkeypatch.setattr(
         app, "is_playback_available", lambda soundfont_name=None: (True, None)
     )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
-    (
-        dropdown_update,
-        status_message,
-        history_html,
-        cleared_midi_path,
-        cleared_audio_path,
-        cleared_visualization,
-        current_generation_id,
-        current_saved_soundfont,
-        current_audio_path,
-        rerender_update,
-    ) = app.delete_history_item(
+    assert app.show_delete_confirmation("gen_1")[0] == {"visible": True}
+    assert deleted == []
+    result = app.delete_history_item(
         "gen_1",
         current_generation_id="gen_1",
         soundfont_choice="new.sf2",
@@ -761,192 +789,22 @@ def test_delete_history_item_disables_rerender_for_deleted_loaded_generation(
         current_audio_path=str(audio_path),
     )
 
-    assert dropdown_update == {"choices": ["gen_2"], "value": None}
-    assert status_message == "Deleted generation"
-    assert history_html == "<div>history</div>"
-    assert cleared_midi_path is None
-    assert cleared_audio_path is None
-    assert cleared_visualization is None
-    assert current_generation_id is None
-    assert current_saved_soundfont is None
-    assert current_audio_path is None
-    assert rerender_update["interactive"] is False
+    assert deleted == ["gen_1"]
+    assert result[0] == {"choices": [("remaining", "gen_2")], "value": None}
+    assert result[1] == "Deleted generation"
+    assert result[2] == {"visible": False}
+    assert result[3:9] == (None, None, None, None, None, None)
+    assert result[9]["interactive"] is False
 
 
-def test_render_history_html_displays_zero_cost(monkeypatch):
-    monkeypatch.setattr(
-        app,
-        "load_history",
-        lambda: [
-            SimpleNamespace(
-                id="20260101_120000",
-                timestamp=__import__("datetime").datetime(2026, 1, 1, 12, 0),
-                prompt="local model loop",
-                key="C",
-                scale="Major",
-                model="llama3",
-                cost=0,
-            )
-        ],
-    )
-
-    html = app.render_history_html()
-
-    assert "Cost: $0.0000" in html
-    assert "Cost: N/A" not in html
-
-
-def test_render_history_html_uses_theme_aware_classes(monkeypatch):
+def test_history_empty_and_missing_selection(monkeypatch):
     monkeypatch.setattr(app, "load_history", list)
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
-    rendered_history = app.render_history_html()
-
-    assert 'class="history-empty"' in rendered_history
-
-
-def test_render_history_html_displays_missing_cost_as_na(monkeypatch):
-    monkeypatch.setattr(
-        app,
-        "load_history",
-        lambda: [
-            SimpleNamespace(
-                id="20260101_120000",
-                timestamp=__import__("datetime").datetime(2026, 1, 1, 12, 0),
-                prompt="cloud model loop",
-                key="C",
-                scale="Major",
-                model="gpt-5-mini",
-                cost=None,
-            )
-        ],
-    )
-
-    html = app.render_history_html()
-
-    assert "Cost: N/A" in html
-
-
-def test_render_history_html_pairs_model_with_reasoning_details(monkeypatch):
-    monkeypatch.setattr(
-        app,
-        "get_model_info",
-        lambda: {
-            "models": {
-                "OpenAI": {
-                    "effort-model": {
-                        "extended_thinking": True,
-                        "effort_options": ["low", "medium", "high", "xhigh"],
-                    }
-                },
-                "Anthropic": {
-                    "toggle-model": {
-                        "extended_thinking": True,
-                        "effort_options": [],
-                    }
-                },
-            }
-        },
-    )
-    history_defaults = {
-        "timestamp": __import__("datetime").datetime(2026, 1, 1, 12, 0),
-        "prompt": "history reasoning",
-        "key": "C",
-        "scale": "Major",
-        "cost": None,
-    }
-    monkeypatch.setattr(
-        app,
-        "load_history",
-        lambda: [
-            SimpleNamespace(
-                **history_defaults,
-                id="effort",
-                provider="OpenAI",
-                model="effort-model",
-                use_thinking=False,
-                effort="xhigh",
-            ),
-            SimpleNamespace(
-                **history_defaults,
-                id="toggle",
-                provider="Anthropic",
-                model="toggle-model",
-                use_thinking=True,
-                effort="low",
-            ),
-            SimpleNamespace(
-                **history_defaults,
-                id="legacy",
-                provider="OpenAI",
-                model="legacy-model",
-                use_thinking=None,
-                effort=None,
-            ),
-            SimpleNamespace(
-                **history_defaults,
-                id="toggle-off",
-                provider="Anthropic",
-                model="toggle-off-model",
-                use_thinking=False,
-                effort="low",
-            ),
-        ],
-    )
-
-    rendered_history = app.render_history_html()
-
-    assert "effort-model (xhigh)" in rendered_history
-    assert "toggle-model (reasoning)" in rendered_history
-    assert "legacy-model (" not in rendered_history
-    assert "toggle-off-model (" not in rendered_history
-
-
-def test_render_history_html_escapes_persisted_metadata(monkeypatch):
-    monkeypatch.setattr(
-        app,
-        "load_history",
-        lambda: [
-            SimpleNamespace(
-                id='"><script>alert(1)</script>',
-                timestamp=__import__("datetime").datetime(2026, 1, 1, 12, 0),
-                prompt="<img src=x onerror=alert(1)>",
-                key="<b>C</b>",
-                scale="<i>Major</i>",
-                model="<em>model</em>",
-                provider="OpenAI",
-                use_thinking=False,
-                effort="<script>effort</script>",
-                cost=0,
-            )
-        ],
-    )
-    monkeypatch.setattr(
-        app,
-        "get_model_info",
-        lambda: {
-            "models": {
-                "OpenAI": {
-                    "<em>model</em>": {
-                        "extended_thinking": True,
-                        "effort_options": ["<script>effort</script>"],
-                    }
-                }
-            }
-        },
-    )
-
-    rendered_history = app.render_history_html()
-
-    assert (
-        'data-id="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"' in rendered_history
-    )
-    assert "&lt;b&gt;C&lt;/b&gt; &lt;i&gt;Major&lt;/i&gt;" in rendered_history
-    assert "&lt;img src=x onerror=alert(1)&gt;" in rendered_history
-    assert "&lt;em&gt;model&lt;/em&gt;" in rendered_history
-    assert "&lt;script&gt;effort&lt;/script&gt;" in rendered_history
-    assert "<script>alert(1)</script>" not in rendered_history
-    assert "<img src=x onerror=alert(1)>" not in rendered_history
-    assert "<script>effort</script>" not in rendered_history
+    assert app.get_history_choices() == []
+    assert app.refresh_history("missing")["value"] is None
+    assert app.show_delete_confirmation(None)[0] == {"visible": False}
+    assert app.load_history_item(None)[4] == "No generation selected"
 
 
 def test_refresh_soundfont_controls_stays_disabled_after_active_delete(monkeypatch):
@@ -999,6 +857,28 @@ def test_audio_playback_loops_generated_audio():
     )
 
     assert audio["props"]["loop"] is True
+
+
+def test_history_sidebar_uses_one_selector_and_confirmed_delete():
+    demo = app.create_demo(playback_status=(True, None))
+    components = {component["id"]: component for component in demo.config["components"]}
+    dependencies = {
+        dependency["api_name"]: dependency
+        for dependency in demo.config["dependencies"]
+        if dependency["api_name"]
+    }
+    selector = dependencies["load_history_item"]["inputs"][0]
+
+    assert components[selector]["type"] == "radio"
+    assert components[selector]["props"]["label"] == "Recent Generations"
+    assert dependencies["show_delete_confirmation"]["inputs"] == [selector]
+    assert dependencies["delete_history_item"]["inputs"][0] == selector
+    assert dependencies["refresh_history"]["inputs"] == [selector]
+    assert not any(
+        component["type"] == "dropdown"
+        and component["props"].get("label") == "Select Generation"
+        for component in components.values()
+    )
 
 
 def test_history_load_callback_updates_all_parameter_controls_once():

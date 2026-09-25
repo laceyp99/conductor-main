@@ -42,7 +42,7 @@ current feature set; do not add features that bypass Core's engine.
 - Importing the package must not launch Gradio.
 - Do not make live provider calls during ordinary tests.
 - Do not commit API keys, prompt experiments, generations, or build output.
-- Keep relevant documentation and the changelog in sync with behavior changes.
+- Keep relevant documentation in sync with behavior changes.
 
 ## Stop hitting yourself
 
@@ -62,6 +62,7 @@ callback or layout behavior changes.
 - Use Conventional Commit prefixes (`feat`, `fix`, `chore`, `docs`, `ci`) with
   an optional scope such as `chore(deps)`.
 - Keep PR titles short and lowercase; describe the user-visible effect.
-- One concern per PR. Core version bumps get their own PR.
+- One concern per PR. A `conductor-core` version bump and the client changes
+  it requires ship together in the same PR; keep unrelated work out of it.
 - Do not commit `plan.md`, `review.md`, or other workspace artifacts.
 

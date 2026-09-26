@@ -1278,6 +1278,18 @@ def test_refresh_history_preserves_only_existing_selection(monkeypatch):
     assert app.refresh_history("gen_1")["value"] == "gen_1"
     assert app.refresh_history("missing")["value"] is None
     assert app.toggle_history_sidebar(False, "gen_1")[-1]["value"] == "gen_1"
+    assert app.toggle_history_sidebar(False, "missing")[-1]["value"] is None
+
+
+def test_hiding_history_leaves_the_list_and_selection_untouched(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_history_choices",
+        lambda: (_ for _ in ()).throw(AssertionError("must not reload on hide")),
+    )
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    assert app.toggle_history_sidebar(True, "gen_1")[-1] == {}
 
 
 def test_delete_requires_confirmation_and_clears_loaded_artifacts(

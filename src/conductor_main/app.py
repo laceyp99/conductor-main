@@ -935,18 +935,18 @@ def run_loop(
 
 
 def toggle_history_sidebar(is_visible, selected_id):
-    """Toggle the history sidebar while preserving a valid selection."""
+    """Toggle the history sidebar while preserving a valid selection.
+
+    Hiding leaves the list untouched; showing reloads it and keeps the
+    selection while its generation still exists.
+    """
     new_visible = not is_visible
     button_text = "Hide History" if new_visible else "History"
-    choices = get_history_choices() if new_visible else []
-    selection = (
-        selected_id if any(value == selected_id for _, value in choices) else None
-    )
     return (
         new_visible,
         button_text,
         gr.update(visible=new_visible),
-        gr.update(choices=choices, value=selection),
+        refresh_history(selected_id) if new_visible else gr.update(),
     )
 
 

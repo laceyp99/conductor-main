@@ -64,7 +64,7 @@ Click **History** to open the recent-generation sidebar. From there you can:
 - Select a generation from the list, then click **Load** to restore it. The selected row stays highlighted, and the status shows when loading succeeds;
 - Click **Delete...** to replace the action buttons with **Confirm Delete** and **Cancel**. Select another entry, click **Cancel**, or hide the sidebar to restore the usual buttons; confirm to remove the selected generation and its saved files;
 - **Refresh** the newest-first list after external changes. Selection remains if the generation still exists;
-- Inspect key, scale, prompt preview, model, reasoning setting, and timestamp in each row.
+- Inspect each entry on three lines: key, scale, and timestamp; model and reasoning setting; and the prompt, shortened with an ellipsis when it does not fit.
 
 By default, the app keeps the newest 20 generations under its data directory:
 

@@ -1265,10 +1265,31 @@ def test_history_choices_show_context_in_newest_first_order(monkeypatch):
     choices = app.get_history_choices()
 
     assert [value for _, value in choices] == ["new", "old"]
-    assert "C Major" in choices[0][0]
-    assert "similar prompt new" in choices[0][0]
-    assert "model-a" in choices[0][0]
-    assert "Jan 02" in choices[0][0]
+    assert choices[0][0] == ("C Major · Jan 02, 12:00 PM\nmodel-a\nsimilar prompt new")
+
+
+def test_history_labels_keep_prompt_on_one_bounded_line(monkeypatch):
+    from datetime import datetime, timezone
+
+    entry = SimpleNamespace(
+        id="gen",
+        timestamp=datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc),
+        prompt="first line\n\nsecond\tline " + "x" * 200,
+        key="C",
+        scale="Major",
+        model="model-a",
+        provider="OpenAI",
+        use_thinking=None,
+        effort=None,
+    )
+    monkeypatch.setattr(app, "load_history", lambda: [entry])
+
+    _, model, prompt = app.get_history_choices()[0][0].split("\n")
+
+    assert model == "model-a"
+    assert prompt.startswith("first line second line x")
+    assert prompt.endswith("...")
+    assert len(prompt) == app.HISTORY_PROMPT_MAX_CHARS + len("...")
 
 
 def test_refresh_history_preserves_only_existing_selection(monkeypatch):

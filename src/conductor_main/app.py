@@ -43,6 +43,7 @@ DEFAULT_PROVIDER = "Google"
 DEFAULT_TEMPERATURE = 0.1
 CONDUCTOR_APP_DIRNAME = "main"
 MAX_HISTORY_GENERATIONS = 20
+HISTORY_PROMPT_MAX_CHARS = 120
 DELETE_CONFIRMATION_PROMPT = "Confirm deletion of the selected generation."
 # 0 sends no num_ctx, so Ollama's own default applies.
 OLLAMA_CONTEXT_SIZE_CHOICES = [("Ollama default", 0)] + [
@@ -96,8 +97,19 @@ APP_CSS = """
 .history-list label {
     border: 1px solid var(--border-color-primary);
     border-radius: 8px;
+    box-sizing: border-box;
     margin-bottom: 8px;
+    min-width: 0;
     padding: 10px;
+    width: 100%;
+}
+/* Keep each entry to its three label lines; overflowing lines end in an ellipsis. */
+.history-list label span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: pre;
 }
 .history-list label:hover {
     border-color: var(--border-color-accent);
@@ -984,10 +996,14 @@ def get_history_choices():
     choices = []
     for gen in history:
         timestamp = gen.timestamp.strftime("%b %d, %I:%M %p")
-        prompt = gen.prompt[:60] + "..." if len(gen.prompt) > 60 else gen.prompt
+        # Collapse line breaks so the prompt stays on its own label line; CSS
+        # adds the visible ellipsis, and the cap only bounds the label size.
+        prompt = " ".join(gen.prompt.split())
+        if len(prompt) > HISTORY_PROMPT_MAX_CHARS:
+            prompt = prompt[:HISTORY_PROMPT_MAX_CHARS] + "..."
         reasoning = format_history_reasoning(gen, model_info)
         model = f"{gen.model} ({reasoning})" if reasoning else gen.model
-        label = f"{gen.key} {gen.scale} | {prompt} | {model} | {timestamp}"
+        label = f"{gen.key} {gen.scale} · {timestamp}\n{model}\n{prompt}"
         choices.append((label, gen.id))
     return choices
 
@@ -1488,7 +1504,11 @@ def create_demo(playback_status=None):
 
             # History sidebar (initially hidden)
             with gr.Column(
-                scale=1, visible=False, elem_classes=["history-sidebar"]
+                scale=1,
+                # Room for the model line beside the radio and label padding.
+                min_width=360,
+                visible=False,
+                elem_classes=["history-sidebar"],
             ) as history_sidebar:
                 gr.Markdown("## History")
 

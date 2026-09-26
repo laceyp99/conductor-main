@@ -8,7 +8,6 @@ Features:
 - Toggleable history sidebar panel
 """
 
-import html
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -44,6 +43,8 @@ DEFAULT_PROVIDER = "Google"
 DEFAULT_TEMPERATURE = 0.1
 CONDUCTOR_APP_DIRNAME = "main"
 MAX_HISTORY_GENERATIONS = 20
+HISTORY_PROMPT_MAX_CHARS = 120
+DELETE_CONFIRMATION_PROMPT = "Confirm deletion of the selected generation."
 # 0 sends no num_ctx, so Ollama's own default applies.
 OLLAMA_CONTEXT_SIZE_CHOICES = [("Ollama default", 0)] + [
     (f"{size:,}", size) for size in (1024, 4096, 16384, 65536, 262144)
@@ -93,42 +94,29 @@ APP_CSS = """
     height: 100%;
     overflow-y: auto;
 }
-.history-item {
-    background: var(--block-background-fill);
+.history-list label {
     border: 1px solid var(--border-color-primary);
     border-radius: 8px;
-    padding: 12px;
-    margin-bottom: 10px;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+    min-width: 0;
+    padding: 10px;
+    width: 100%;
 }
-.history-item:hover {
-    border-color: var(--border-color-accent) !important;
-    cursor: pointer;
+/* Keep each entry to its three label lines; overflowing lines end in an ellipsis. */
+.history-list label span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: pre;
 }
-.history-item-title {
-    color: var(--body-text-color);
-    font-weight: bold;
-    margin-bottom: 4px;
+.history-list label:hover {
+    border-color: var(--border-color-accent);
 }
-.history-item-prompt {
-    color: var(--block-label-text-color);
-    font-size: 0.85em;
-    margin-bottom: 6px;
-}
-.history-item-metadata {
-    color: var(--block-label-text-color);
-    display: flex;
-    font-size: 0.8em;
-    justify-content: space-between;
-}
-.history-item-cost {
-    color: var(--block-label-text-color);
-    font-size: 0.75em;
-    margin-top: 4px;
-}
-.history-empty {
-    color: var(--block-label-text-color);
-    padding: 20px;
-    text-align: center;
+.history-list label:has(input:checked) {
+    border-color: var(--border-color-accent);
+    background: var(--block-background-fill);
 }
 """
 
@@ -286,7 +274,7 @@ class HistoryControlUpdates:
 
 
 def get_history_control_updates(gen):
-    """Build form updates without provider discovery or live service calls."""
+    """Build form updates, checking saved Ollama models against local discovery."""
     model_info = get_model_info()
     known_models = model_info["models"]
     provider = gen.provider
@@ -300,12 +288,23 @@ def get_history_control_updates(gen):
         key_update = gr.update(value=ui_key)
 
     provider_choices = list(known_models)
-    provider_is_available = provider in known_models
+    ollama_status = (
+        ollama_api.get_ollama_status(request_timeout=3.0)
+        if provider == "Ollama"
+        else None
+    )
+    if ollama_status and ollama_status["available"]:
+        provider_choices.append("Ollama")
+    provider_is_available = provider in known_models or bool(
+        ollama_status and ollama_status["available"]
+    )
     if not provider_is_available:
         provider_choices.append((f"{provider} (unavailable)", provider))
 
     if provider_is_available:
-        provider_models = known_models[provider]
+        provider_models = (
+            ollama_status["models"] if provider == "Ollama" else known_models[provider]
+        )
         model_choices = [
             (format_model_label(provider, model_name), model_name)
             for model_name in provider_models
@@ -948,25 +947,22 @@ def run_loop(
         yield None, None, None, str(e), gr.update(visible=False), None, None, None
 
 
-def toggle_history_sidebar(is_visible):
-    """Toggle the visibility of the history sidebar.
+def toggle_history_sidebar(is_visible, selected_id, status=None):
+    """Toggle the history sidebar while preserving a valid selection.
 
-    Args:
-        is_visible (bool): Current visibility state.
-
-    Returns:
-        tuple: (new_visibility, button_text, sidebar_update, history_html, dropdown_update)
+    Hiding leaves the list untouched; showing reloads it and keeps the
+    selection while its generation still exists. Either way a pending delete
+    confirmation is cancelled, along with its prompt.
     """
     new_visible = not is_visible
     button_text = "Hide History" if new_visible else "History"
-    history_html = render_history_html() if new_visible else ""
-    choices = get_history_choices() if new_visible else []
     return (
         new_visible,
         button_text,
         gr.update(visible=new_visible),
-        history_html,
-        gr.update(choices=choices, value=None),
+        refresh_history(selected_id) if new_visible else gr.update(),
+        *hide_delete_confirmation(),
+        "" if status == DELETE_CONFIRMATION_PROMPT else gr.update(),
     )
 
 
@@ -993,71 +989,55 @@ def format_history_reasoning(gen, model_info):
     return ""
 
 
-def render_history_html():
-    """Render the history items as HTML.
-
-    Returns:
-        str: HTML string for the history items.
-    """
-    history = load_history()
-
-    if not history:
-        return """
-        <div class="history-empty">
-            <p>No generations yet.</p>
-            <p style="font-size: 0.9em;">Your generated loops will appear here.</p>
-        </div>
-        """
-
-    html_parts = []
-    model_info = get_model_info()
-    for gen in history:
-        timestamp_str = gen.timestamp.strftime("%b %d, %I:%M %p")
-        cost_str = f"${gen.cost:.4f}" if gen.cost is not None else "N/A"
-        prompt_preview = gen.prompt[:40] + "..." if len(gen.prompt) > 40 else gen.prompt
-        generation_id = html.escape(str(gen.id), quote=True)
-        key = html.escape(str(gen.key), quote=True)
-        scale = html.escape(str(gen.scale), quote=True)
-        prompt_preview = html.escape(prompt_preview, quote=True)
-        model = html.escape(str(gen.model), quote=True)
-        reasoning = html.escape(format_history_reasoning(gen, model_info), quote=True)
-        reasoning_suffix = f" ({reasoning})" if reasoning else ""
-
-        html_parts.append(f"""
-        <div class="history-item" data-id="{generation_id}">
-            <div class="history-item-title">
-                {key} {scale}
-            </div>
-            <div class="history-item-prompt">
-                "{prompt_preview}"
-            </div>
-            <div class="history-item-metadata">
-                <span>{model}{reasoning_suffix}</span>
-                <span>{timestamp_str}</span>
-            </div>
-            <div class="history-item-cost">
-                Cost: {cost_str}
-            </div>
-        </div>
-        """)
-
-    return "".join(html_parts)
-
-
 def get_history_choices():
-    """Get the history items as choices for the dropdown.
-
-    Returns:
-        list: List of (label, value) tuples for dropdown choices.
-    """
+    """Return newest-first, identifiable entries for the single history selector."""
     history = load_history()
+    model_info = get_model_info() if history else None
     choices = []
     for gen in history:
-        timestamp_str = gen.timestamp.strftime("%b %d %I:%M%p")
-        prompt_preview = gen.prompt[:25] + "..." if len(gen.prompt) > 25 else gen.prompt
-        label = f"{gen.key} {gen.scale} - {prompt_preview} ({timestamp_str})"
+        timestamp = gen.timestamp.strftime("%b %d, %I:%M %p")
+        # Collapse line breaks so the prompt stays on its own label line; CSS
+        # adds the visible ellipsis, and the cap only bounds the label size.
+        prompt = " ".join(gen.prompt.split())
+        if len(prompt) > HISTORY_PROMPT_MAX_CHARS:
+            prompt = prompt[:HISTORY_PROMPT_MAX_CHARS] + "..."
+        reasoning = format_history_reasoning(gen, model_info)
+        model = f"{gen.model} ({reasoning})" if reasoning else gen.model
+        label = f"{gen.key} {gen.scale} · {timestamp}\n{model}\n{prompt}"
         choices.append((label, gen.id))
     return choices
+
+
+def select_history_item(gen_id):
+    """Clear an old loaded indicator when the selected entry changes."""
+    return "Select Load to restore this generation." if gen_id else ""
+
+
+def loaded_history_status(gen_id):
+    return "Loaded generation." if gen_id else "Generation was not loaded."
+
+
+def show_delete_confirmation(gen_id):
+    """Require a separate confirmation before deleting a selected generation."""
+    if not gen_id:
+        return (
+            gr.update(visible=True),
+            gr.update(visible=False),
+            "Select a generation to delete.",
+        )
+    return (
+        gr.update(visible=False),
+        gr.update(visible=True),
+        DELETE_CONFIRMATION_PROMPT,
+    )
+
+
+def hide_delete_confirmation():
+    return gr.update(visible=True), gr.update(visible=False)
+
+
+def cancel_delete_confirmation():
+    return gr.update(visible=True), gr.update(visible=False), ""
 
 
 def load_history_item(gen_id):
@@ -1161,21 +1141,13 @@ def delete_history_item(
     current_saved_soundfont=None,
     current_audio_path=None,
 ):
-    """Delete a history item.
-
-    Args:
-        gen_id (str): The generation ID to delete.
-
-    Returns:
-        tuple: (dropdown_update, status_message, history_html, midi_path, audio_path,
-               visualization, generation_id, saved_soundfont, current_audio_path,
-               rerender_update)
-    """
+    """Delete a confirmed item and clear loaded artifacts only if it was active."""
     if not gen_id:
         return (
             gr.update(choices=get_history_choices(), value=None),
             "No generation selected",
-            render_history_html(),
+            gr.update(visible=True),
+            gr.update(visible=False),
             gr.update(),
             gr.update(),
             gr.update(),
@@ -1187,45 +1159,31 @@ def delete_history_item(
 
     success = delete_generation(gen_id)
     choices = get_history_choices()
-    deleted_active_generation = success and gen_id == current_generation_id
-    if success:
-        return (
-            gr.update(choices=choices, value=None),
-            "Deleted generation",
-            render_history_html(),
-            None if deleted_active_generation else gr.update(),
-            None if deleted_active_generation else gr.update(),
-            None if deleted_active_generation else gr.update(),
-            None if deleted_active_generation else current_generation_id,
-            None if deleted_active_generation else current_saved_soundfont,
-            None if deleted_active_generation else current_audio_path,
-            get_rerender_button_update(
-                soundfont_choice,
-                None if deleted_active_generation else midi_path,
-            ),
-        )
+    deleted_active = success and gen_id == current_generation_id
     return (
-        gr.update(choices=choices, value=None),
-        "Failed to delete generation",
-        render_history_html(),
-        gr.update(),
-        gr.update(),
-        gr.update(),
-        current_generation_id,
-        current_saved_soundfont,
-        current_audio_path,
-        get_rerender_button_update(soundfont_choice, midi_path),
+        gr.update(choices=choices, value=None if success else gen_id),
+        "Deleted generation" if success else "Failed to delete generation",
+        gr.update(visible=True),
+        gr.update(visible=False),
+        None if deleted_active else gr.update(),
+        None if deleted_active else gr.update(),
+        None if deleted_active else gr.update(),
+        None if deleted_active else current_generation_id,
+        None if deleted_active else current_saved_soundfont,
+        None if deleted_active else current_audio_path,
+        get_rerender_button_update(
+            soundfont_choice, None if deleted_active else midi_path
+        ),
     )
 
 
-def refresh_history():
-    """Refresh the history display.
-
-    Returns:
-        tuple: (dropdown_update, history_html)
-    """
+def refresh_history(selected_id):
+    """Refresh entries and preserve selection only while its generation exists."""
     choices = get_history_choices()
-    return gr.update(choices=choices, value=None), render_history_html()
+    selection = (
+        selected_id if any(value == selected_id for _, value in choices) else None
+    )
+    return gr.update(choices=choices, value=selection)
 
 
 PIANO_ROLL_RESIZE_JS = """
@@ -1546,53 +1504,61 @@ def create_demo(playback_status=None):
 
             # History sidebar (initially hidden)
             with gr.Column(
-                scale=1, visible=False, elem_classes=["history-sidebar"]
+                scale=1,
+                # Room for the model line beside the radio and label padding.
+                min_width=360,
+                visible=False,
+                elem_classes=["history-sidebar"],
             ) as history_sidebar:
                 gr.Markdown("## History")
 
-                # Dropdown to select a generation
-                history_dropdown = gr.Dropdown(
-                    label="Select Generation",
+                with gr.Row() as history_actions:
+                    load_btn = gr.Button("Load", size="sm", variant="primary")
+                    delete_btn = gr.Button("Delete...", size="sm", variant="stop")
+                    refresh_btn = gr.Button("Refresh", size="sm")
+                with gr.Row(visible=False) as delete_confirmation:
+                    confirm_delete_btn = gr.Button(
+                        "Confirm Delete", size="sm", variant="stop"
+                    )
+                    cancel_delete_btn = gr.Button("Cancel", size="sm")
+                history_status = gr.Textbox(label="History status", interactive=False)
+                history_list = gr.Radio(
+                    label="Recent Generations",
                     choices=get_history_choices(),
                     interactive=True,
-                )
-
-                with gr.Row():
-                    load_btn = gr.Button("Load", size="sm", variant="primary")
-                    delete_btn = gr.Button("Delete", size="sm", variant="stop")
-                    refresh_btn = gr.Button("Refresh", size="sm")
-
-                # History items display
-                history_html = gr.HTML(
-                    value=render_history_html(),
-                    label="Recent Generations",
-                )
-
-                # Status message for history operations
-                history_status = gr.Textbox(
-                    label="Status",
-                    interactive=False,
-                    visible=False,
+                    elem_classes=["history-list"],
                 )
 
         # History sidebar toggle
         history_toggle_event = history_toggle_btn.click(
             toggle_history_sidebar,
-            inputs=[sidebar_visible],
+            inputs=[sidebar_visible, history_list, history_status],
             outputs=[
                 sidebar_visible,
                 history_toggle_btn,
                 history_sidebar,
-                history_html,
-                history_dropdown,
+                history_list,
+                history_actions,
+                delete_confirmation,
+                history_status,
             ],
         )
         history_toggle_event.then(fn=None, js=PIANO_ROLL_RESIZE_JS, queue=False)
 
+        # .input fires only on user selection, not on programmatic list updates.
+        history_list.input(
+            select_history_item,
+            inputs=[history_list],
+            outputs=[history_status],
+        ).then(
+            hide_delete_confirmation,
+            outputs=[history_actions, delete_confirmation],
+        )
+
         # Load history item into main view
         load_btn.click(
             load_history_item,
-            inputs=[history_dropdown],
+            inputs=[history_list],
             outputs=[
                 prog_output,
                 audio_output,
@@ -1614,13 +1580,25 @@ def create_demo(playback_status=None):
                 requested_temperature,
                 reasoning_control,
             ],
+        ).then(
+            loaded_history_status,
+            inputs=[current_generation_id],
+            outputs=[history_status],
         )
 
-        # Delete history item
         delete_btn.click(
+            show_delete_confirmation,
+            inputs=[history_list],
+            outputs=[history_actions, delete_confirmation, history_status],
+        )
+        cancel_delete_btn.click(
+            cancel_delete_confirmation,
+            outputs=[history_actions, delete_confirmation, history_status],
+        )
+        confirm_delete_btn.click(
             delete_history_item,
             inputs=[
-                history_dropdown,
+                history_list,
                 current_generation_id,
                 soundfont_input,
                 prog_output,
@@ -1628,9 +1606,10 @@ def create_demo(playback_status=None):
                 current_audio_path,
             ],
             outputs=[
-                history_dropdown,
+                history_list,
                 history_status,
-                history_html,
+                history_actions,
+                delete_confirmation,
                 prog_output,
                 audio_output,
                 vis_output,
@@ -1641,21 +1620,20 @@ def create_demo(playback_status=None):
             ],
         )
 
-        # Refresh history
         refresh_btn.click(
             refresh_history,
-            outputs=[history_dropdown, history_html],
+            inputs=[history_list],
+            outputs=[history_list],
         )
 
-        # Also refresh history after generation completes (when the stop-waiting button becomes hidden)
-        # We do this by having the generation flow trigger a refresh
         gen_event.then(
             get_rerender_button_update,
             inputs=[soundfont_input, prog_output],
             outputs=[rerender_button],
         ).then(
             refresh_history,
-            outputs=[history_dropdown, history_html],
+            inputs=[history_list],
+            outputs=[history_list],
         )
 
     return demo

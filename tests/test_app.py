@@ -832,23 +832,32 @@ def test_history_controls_use_defaults_and_warn_for_legacy_reasoning(monkeypatch
     assert updates.warnings == ("Reasoning settings weren't saved; defaults applied.",)
 
 
-def test_history_controls_preserve_unavailable_provider_and_model_without_discovery(
+def test_history_controls_restore_installed_ollama_without_false_unavailable(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        app,
-        "get_model_info",
-        lambda: {"models": {"OpenAI": {"current-model": {}}}},
+        app, "get_model_info", lambda: {"models": {"OpenAI": {"current-model": {}}}}
     )
     monkeypatch.setattr(
         app.ollama_api,
         "get_ollama_status",
-        lambda: (_ for _ in ()).throw(AssertionError("must not discover Ollama")),
+        lambda request_timeout: {
+            "available": True,
+            "models": ["gemma4:e4b", "other:latest"],
+        },
+    )
+    monkeypatch.setattr(
+        app.ollama_api, "get_model_list", lambda: ["gemma4:e4b", "other:latest"]
     )
     monkeypatch.setattr(
         app.ollama_api,
         "get_model_status",
-        lambda model: (_ for _ in ()).throw(AssertionError("must not inspect Ollama")),
+        lambda model: {
+            "model_capabilities": {
+                "extended_thinking": True,
+                "effort_options": ["low", "medium", "high"],
+            }
+        },
     )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
@@ -858,22 +867,87 @@ def test_history_controls_preserve_unavailable_provider_and_model_without_discov
             scale="Major",
             prompt="local history",
             provider="Ollama",
-            model="retired-local-model",
+            model="gemma4:e4b",
             temperature=0.5,
             use_thinking=True,
             effort="medium",
         )
     )
 
+    assert updates.provider == {"choices": ["OpenAI", "Ollama"], "value": "Ollama"}
+    assert updates.model == {
+        "choices": [("gemma4:e4b", "gemma4:e4b"), ("other:latest", "other:latest")],
+        "value": "gemma4:e4b",
+    }
+    assert updates.temperature == {"visible": True, "value": 0.5, "interactive": True}
+    assert updates.use_thinking == {"visible": False, "value": True}
+    assert updates.effort == {
+        "choices": ["low", "medium", "high"],
+        "value": "medium",
+        "visible": True,
+    }
+    assert updates.warnings == ()
+
+
+def test_history_controls_mark_missing_ollama_model_only(monkeypatch):
+    monkeypatch.setattr(
+        app, "get_model_info", lambda: {"models": {"OpenAI": {"current-model": {}}}}
+    )
+    monkeypatch.setattr(
+        app.ollama_api,
+        "get_ollama_status",
+        lambda request_timeout: {"available": True, "models": ["other:latest"]},
+    )
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    updates = app.get_history_control_updates(
+        SimpleNamespace(
+            key="C",
+            scale="Major",
+            prompt="local",
+            provider="Ollama",
+            model="missing:latest",
+            temperature=0.5,
+            use_thinking=False,
+            effort="low",
+        )
+    )
+
+    assert updates.provider["choices"][-1] == "Ollama"
+    assert updates.model["choices"][-1] == (
+        "missing:latest (unavailable)",
+        "missing:latest",
+    )
+    assert updates.warnings == ("Unavailable selection: Ollama / missing:latest.",)
+
+
+def test_history_controls_preserve_ollama_when_service_unreachable(monkeypatch):
+    monkeypatch.setattr(
+        app, "get_model_info", lambda: {"models": {"OpenAI": {"current-model": {}}}}
+    )
+    monkeypatch.setattr(
+        app.ollama_api,
+        "get_ollama_status",
+        lambda request_timeout: {"available": False, "models": []},
+    )
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    updates = app.get_history_control_updates(
+        SimpleNamespace(
+            key="C",
+            scale="Major",
+            prompt="local",
+            provider="Ollama",
+            model="gemma4:e4b",
+            temperature=0.5,
+            use_thinking=False,
+            effort="low",
+        )
+    )
+
     assert updates.provider["choices"][-1] == ("Ollama (unavailable)", "Ollama")
-    assert updates.provider["value"] == "Ollama"
-    assert updates.model["choices"] == [
-        ("retired-local-model (unavailable)", "retired-local-model")
-    ]
-    assert updates.model["value"] == "retired-local-model"
-    assert updates.use_thinking["value"] is True
-    assert updates.effort["value"] == "medium"
-    assert updates.warnings == ("Unavailable selection: Ollama / retired-local-model.",)
+    assert updates.model["choices"] == [("gemma4:e4b (unavailable)", "gemma4:e4b")]
+    assert updates.warnings == ("Unavailable selection: Ollama / gemma4:e4b.",)
 
 
 def test_history_store_uses_the_app_retention_policy():
@@ -1170,33 +1244,119 @@ def test_get_rerender_button_update_requires_active_midi(monkeypatch):
     assert rerender_update["interactive"] is False
 
 
-def test_delete_history_item_disables_rerender_for_deleted_loaded_generation(
+def test_history_choices_show_context_in_newest_first_order(monkeypatch):
+    from datetime import datetime, timezone
+
+    entries = [
+        SimpleNamespace(
+            id=identifier,
+            timestamp=datetime(2026, 1, day, 12, 0, tzinfo=timezone.utc),
+            prompt="similar prompt " + identifier,
+            key="C",
+            scale="Major",
+            model="model-a",
+            provider="OpenAI",
+            use_thinking=None,
+            effort=None,
+        )
+        for identifier, day in [("new", 2), ("old", 1)]
+    ]
+    monkeypatch.setattr(app, "load_history", lambda: entries)
+    choices = app.get_history_choices()
+
+    assert [value for _, value in choices] == ["new", "old"]
+    assert choices[0][0] == ("C Major · Jan 02, 12:00 PM\nmodel-a\nsimilar prompt new")
+
+
+def test_history_labels_keep_prompt_on_one_bounded_line(monkeypatch):
+    from datetime import datetime, timezone
+
+    entry = SimpleNamespace(
+        id="gen",
+        timestamp=datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc),
+        prompt="first line\n\nsecond\tline " + "x" * 200,
+        key="C",
+        scale="Major",
+        model="model-a",
+        provider="OpenAI",
+        use_thinking=None,
+        effort=None,
+    )
+    monkeypatch.setattr(app, "load_history", lambda: [entry])
+
+    _, model, prompt = app.get_history_choices()[0][0].split("\n")
+
+    assert model == "model-a"
+    assert prompt.startswith("first line second line x")
+    assert prompt.endswith("...")
+    assert len(prompt) == app.HISTORY_PROMPT_MAX_CHARS + len("...")
+
+
+def test_refresh_history_preserves_only_existing_selection(monkeypatch):
+    monkeypatch.setattr(app, "get_history_choices", lambda: [("first", "gen_1")])
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    assert app.refresh_history("gen_1")["value"] == "gen_1"
+    assert app.refresh_history("missing")["value"] is None
+    assert app.toggle_history_sidebar(False, "gen_1")[3]["value"] == "gen_1"
+    assert app.toggle_history_sidebar(False, "missing")[3]["value"] is None
+
+
+def test_hiding_history_leaves_the_list_and_selection_untouched(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_history_choices",
+        lambda: (_ for _ in ()).throw(AssertionError("must not reload on hide")),
+    )
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    assert app.toggle_history_sidebar(True, "gen_1")[3] == {}
+
+
+def test_toggling_history_cancels_a_pending_delete(monkeypatch):
+    monkeypatch.setattr(app, "get_history_choices", lambda: [("first", "gen_1")])
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    for is_visible in (True, False):
+        assert app.toggle_history_sidebar(
+            is_visible, "gen_1", app.DELETE_CONFIRMATION_PROMPT
+        )[4:] == ({"visible": True}, {"visible": False}, "")
+        assert (
+            app.toggle_history_sidebar(is_visible, "gen_1", "Loaded generation.")[-1]
+            == {}
+        )
+
+
+def test_delete_requires_confirmation_and_clears_loaded_artifacts(
     monkeypatch, tmp_path
 ):
     midi_path = _write_binary_file(tmp_path / "loop.mid")
     audio_path = _write_binary_file(tmp_path / "loop.mp3")
-
-    monkeypatch.setattr(app, "delete_generation", lambda gen_id: True)
-    monkeypatch.setattr(app, "get_history_choices", lambda: ["gen_2"])
-    monkeypatch.setattr(app, "render_history_html", lambda: "<div>history</div>")
+    deleted = []
+    monkeypatch.setattr(
+        app, "delete_generation", lambda gen_id: deleted.append(gen_id) or True
+    )
+    monkeypatch.setattr(app, "get_history_choices", lambda: [("remaining", "gen_2")])
     monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "new.sf2")
     monkeypatch.setattr(
         app, "is_playback_available", lambda soundfont_name=None: (True, None)
     )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
-    (
-        dropdown_update,
-        status_message,
-        history_html,
-        cleared_midi_path,
-        cleared_audio_path,
-        cleared_visualization,
-        current_generation_id,
-        current_saved_soundfont,
-        current_audio_path,
-        rerender_update,
-    ) = app.delete_history_item(
+    assert app.show_delete_confirmation("gen_1")[:2] == (
+        {"visible": False},
+        {"visible": True},
+    )
+    assert app.cancel_delete_confirmation()[:2] == (
+        {"visible": True},
+        {"visible": False},
+    )
+    assert app.hide_delete_confirmation() == (
+        {"visible": True},
+        {"visible": False},
+    )
+    assert deleted == []
+    result = app.delete_history_item(
         "gen_1",
         current_generation_id="gen_1",
         soundfont_choice="new.sf2",
@@ -1205,72 +1365,28 @@ def test_delete_history_item_disables_rerender_for_deleted_loaded_generation(
         current_audio_path=str(audio_path),
     )
 
-    assert dropdown_update == {"choices": ["gen_2"], "value": None}
-    assert status_message == "Deleted generation"
-    assert history_html == "<div>history</div>"
-    assert cleared_midi_path is None
-    assert cleared_audio_path is None
-    assert cleared_visualization is None
-    assert current_generation_id is None
-    assert current_saved_soundfont is None
-    assert current_audio_path is None
-    assert rerender_update["interactive"] is False
+    assert deleted == ["gen_1"]
+    assert result[0] == {"choices": [("remaining", "gen_2")], "value": None}
+    assert result[1] == "Deleted generation"
+    assert result[2:4] == ({"visible": True}, {"visible": False})
+    assert result[4:10] == (None, None, None, None, None, None)
+    assert result[10]["interactive"] is False
 
 
-def test_render_history_html_displays_zero_cost(monkeypatch):
-    monkeypatch.setattr(
-        app,
-        "load_history",
-        lambda: [
-            SimpleNamespace(
-                id="20260101_120000",
-                timestamp=__import__("datetime").datetime(2026, 1, 1, 12, 0),
-                prompt="local model loop",
-                key="C",
-                scale="Major",
-                model="llama3",
-                cost=0,
-            )
-        ],
-    )
-
-    html = app.render_history_html()
-
-    assert "Cost: $0.0000" in html
-    assert "Cost: N/A" not in html
-
-
-def test_render_history_html_uses_theme_aware_classes(monkeypatch):
+def test_history_empty_and_missing_selection(monkeypatch):
     monkeypatch.setattr(app, "load_history", list)
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
-    rendered_history = app.render_history_html()
-
-    assert 'class="history-empty"' in rendered_history
-
-
-def test_render_history_html_displays_missing_cost_as_na(monkeypatch):
-    monkeypatch.setattr(
-        app,
-        "load_history",
-        lambda: [
-            SimpleNamespace(
-                id="20260101_120000",
-                timestamp=__import__("datetime").datetime(2026, 1, 1, 12, 0),
-                prompt="cloud model loop",
-                key="C",
-                scale="Major",
-                model="gpt-5-mini",
-                cost=None,
-            )
-        ],
+    assert app.get_history_choices() == []
+    assert app.refresh_history("missing")["value"] is None
+    assert app.show_delete_confirmation(None)[:2] == (
+        {"visible": True},
+        {"visible": False},
     )
-
-    html = app.render_history_html()
-
-    assert "Cost: N/A" in html
+    assert app.load_history_item(None)[4] == "No generation selected"
 
 
-def test_render_history_html_pairs_model_with_reasoning_details(monkeypatch):
+def test_history_choices_pair_model_with_reasoning_details(monkeypatch):
     monkeypatch.setattr(
         app,
         "get_model_info",
@@ -1362,7 +1478,7 @@ def test_render_history_html_pairs_model_with_reasoning_details(monkeypatch):
         ],
     )
 
-    rendered_history = app.render_history_html()
+    rendered_history = " ".join(label for label, _ in app.get_history_choices())
 
     assert "effort-model (xhigh)" in rendered_history
     assert "effort-off-model (none)" in rendered_history
@@ -1370,54 +1486,6 @@ def test_render_history_html_pairs_model_with_reasoning_details(monkeypatch):
     assert "toggle-model (reasoning)" in rendered_history
     assert "legacy-model (" not in rendered_history
     assert "toggle-off-model (" not in rendered_history
-
-
-def test_render_history_html_escapes_persisted_metadata(monkeypatch):
-    monkeypatch.setattr(
-        app,
-        "load_history",
-        lambda: [
-            SimpleNamespace(
-                id='"><script>alert(1)</script>',
-                timestamp=__import__("datetime").datetime(2026, 1, 1, 12, 0),
-                prompt="<img src=x onerror=alert(1)>",
-                key="<b>C</b>",
-                scale="<i>Major</i>",
-                model="<em>model</em>",
-                provider="OpenAI",
-                use_thinking=False,
-                effort="<script>effort</script>",
-                cost=0,
-            )
-        ],
-    )
-    monkeypatch.setattr(
-        app,
-        "get_model_info",
-        lambda: {
-            "models": {
-                "OpenAI": {
-                    "<em>model</em>": {
-                        "extended_thinking": True,
-                        "effort_options": ["<script>effort</script>"],
-                    }
-                }
-            }
-        },
-    )
-
-    rendered_history = app.render_history_html()
-
-    assert (
-        'data-id="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"' in rendered_history
-    )
-    assert "&lt;b&gt;C&lt;/b&gt; &lt;i&gt;Major&lt;/i&gt;" in rendered_history
-    assert "&lt;img src=x onerror=alert(1)&gt;" in rendered_history
-    assert "&lt;em&gt;model&lt;/em&gt;" in rendered_history
-    assert "&lt;script&gt;effort&lt;/script&gt;" in rendered_history
-    assert "<script>alert(1)</script>" not in rendered_history
-    assert "<img src=x onerror=alert(1)>" not in rendered_history
-    assert "<script>effort</script>" not in rendered_history
 
 
 def test_refresh_soundfont_controls_stays_disabled_after_active_delete(monkeypatch):
@@ -1470,6 +1538,67 @@ def test_audio_playback_loops_generated_audio():
     )
 
     assert audio["props"]["loop"] is True
+
+
+def test_history_sidebar_uses_one_selector_and_confirmed_delete():
+    demo = app.create_demo(playback_status=(True, None))
+    components = {component["id"]: component for component in demo.config["components"]}
+    dependencies = {
+        dependency["api_name"]: dependency
+        for dependency in demo.config["dependencies"]
+        if dependency["api_name"]
+    }
+    selector = dependencies["load_history_item"]["inputs"][0]
+
+    assert components[selector]["type"] == "radio"
+    assert components[selector]["props"]["label"] == "Recent Generations"
+    assert dependencies["show_delete_confirmation"]["inputs"] == [selector]
+    actions_id, confirmation_id, _ = dependencies["show_delete_confirmation"]["outputs"]
+    assert components[actions_id]["type"] == "row"
+    assert components[confirmation_id]["type"] == "row"
+    assert components[actions_id]["props"]["visible"] is True
+    assert components[confirmation_id]["props"]["visible"] is False
+    assert dependencies["hide_delete_confirmation"]["outputs"] == [
+        actions_id,
+        confirmation_id,
+    ]
+    # Programmatic list updates (delete, refresh, toggle) must not reset status.
+    assert dependencies["select_history_item"]["targets"] == [(selector, "input")]
+    assert dependencies["toggle_history_sidebar"]["outputs"][3:6] == [
+        selector,
+        actions_id,
+        confirmation_id,
+    ]
+    assert (
+        dependencies["toggle_history_sidebar"]["inputs"][2]
+        == dependencies["toggle_history_sidebar"]["outputs"][6]
+    )
+    assert dependencies["cancel_delete_confirmation"]["outputs"][:2] == [
+        actions_id,
+        confirmation_id,
+    ]
+    assert dependencies["delete_history_item"]["outputs"][2:4] == [
+        actions_id,
+        confirmation_id,
+    ]
+    assert dependencies["delete_history_item"]["inputs"][0] == selector
+    assert dependencies["refresh_history"]["inputs"] == [selector]
+    sidebar_controls = [
+        component["props"].get("label") or component["props"].get("value")
+        for component in demo.config["components"]
+    ]
+    assert sidebar_controls.index("Load") < sidebar_controls.index("Recent Generations")
+    assert sidebar_controls.index("Delete...") < sidebar_controls.index(
+        "Recent Generations"
+    )
+    assert sidebar_controls.index("History status") < sidebar_controls.index(
+        "Recent Generations"
+    )
+    assert not any(
+        component["type"] == "dropdown"
+        and component["props"].get("label") == "Select Generation"
+        for component in components.values()
+    )
 
 
 def test_history_load_callback_updates_all_parameter_controls_once():

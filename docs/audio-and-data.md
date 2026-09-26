@@ -61,10 +61,10 @@ If the audio toolchain is unavailable, MIDI generation still succeeds. The app s
 
 Click **History** to open the recent-generation sidebar. From there you can:
 
-- Select and **Load** a previous generation;
-- **Delete** a generation and its saved files;
-- **Refresh** the list after external changes;
-- Inspect prompt, model, reasoning settings, musical settings, time, and cost summaries.
+- Select a generation from the list, then click **Load** to restore it. The selected row stays highlighted, and the status shows when loading succeeds;
+- Click **Delete...** to replace the action buttons with **Confirm Delete** and **Cancel**. Select another entry, click **Cancel**, or hide the sidebar to restore the usual buttons; confirm to remove the selected generation and its saved files;
+- **Refresh** the newest-first list after external changes. Selection remains if the generation still exists;
+- Inspect each entry on three lines: key, scale, and timestamp; model and reasoning setting; and the prompt, shortened with an ellipsis when it does not fit.
 
 By default, the app keeps the newest 20 generations under its data directory:
 
@@ -80,3 +80,5 @@ By default, the app keeps the newest 20 generations under its data directory:
 Loading history restores its MIDI, saved audio, visualization, generation ID, SoundFont metadata, loop parameters, provider, model, temperature, and reasoning controls. The restored controls remain editable, so a historical setup can be adjusted before generating again.
 
 Older history entries that did not record reasoning settings use the current model defaults and show a warning. Entries recorded with reasoning off on a model with effort levels restore that model's lowest level, which is what was sent. Saved providers or models that are no longer available remain visible with an unavailable label instead of being silently replaced. Missing SoundFonts are also identified while saved audio remains available.
+
+For Ollama history, the app checks the local service before marking the saved provider or model unavailable, then restores reasoning controls from the capabilities Core reports for that model.

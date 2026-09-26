@@ -1522,7 +1522,8 @@ def create_demo(playback_status=None):
         )
         history_toggle_event.then(fn=None, js=PIANO_ROLL_RESIZE_JS, queue=False)
 
-        history_list.change(
+        # .input fires only on user selection, not on programmatic list updates.
+        history_list.input(
             select_history_item,
             inputs=[history_list],
             outputs=[history_status],

@@ -1538,6 +1538,8 @@ def test_history_sidebar_uses_one_selector_and_confirmed_delete():
         actions_id,
         confirmation_id,
     ]
+    # Programmatic list updates (delete, refresh, toggle) must not reset status.
+    assert dependencies["select_history_item"]["targets"] == [(selector, "input")]
     assert dependencies["toggle_history_sidebar"]["outputs"][3:] == [
         selector,
         actions_id,

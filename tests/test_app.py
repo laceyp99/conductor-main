@@ -1297,9 +1297,12 @@ def test_toggling_history_cancels_a_pending_delete(monkeypatch):
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
     for is_visible in (True, False):
-        assert app.toggle_history_sidebar(is_visible, "gen_1")[4:] == (
-            {"visible": True},
-            {"visible": False},
+        assert app.toggle_history_sidebar(
+            is_visible, "gen_1", app.DELETE_CONFIRMATION_PROMPT
+        )[4:] == ({"visible": True}, {"visible": False}, "")
+        assert (
+            app.toggle_history_sidebar(is_visible, "gen_1", "Loaded generation.")[-1]
+            == {}
         )
 
 
@@ -1540,11 +1543,15 @@ def test_history_sidebar_uses_one_selector_and_confirmed_delete():
     ]
     # Programmatic list updates (delete, refresh, toggle) must not reset status.
     assert dependencies["select_history_item"]["targets"] == [(selector, "input")]
-    assert dependencies["toggle_history_sidebar"]["outputs"][3:] == [
+    assert dependencies["toggle_history_sidebar"]["outputs"][3:6] == [
         selector,
         actions_id,
         confirmation_id,
     ]
+    assert (
+        dependencies["toggle_history_sidebar"]["inputs"][2]
+        == dependencies["toggle_history_sidebar"]["outputs"][6]
+    )
     assert dependencies["cancel_delete_confirmation"]["outputs"][:2] == [
         actions_id,
         confirmation_id,

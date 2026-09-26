@@ -43,6 +43,7 @@ DEFAULT_PROVIDER = "Google"
 DEFAULT_TEMPERATURE = 0.1
 CONDUCTOR_APP_DIRNAME = "main"
 MAX_HISTORY_GENERATIONS = 20
+DELETE_CONFIRMATION_PROMPT = "Confirm deletion of the selected generation."
 # 0 sends no num_ctx, so Ollama's own default applies.
 OLLAMA_CONTEXT_SIZE_CHOICES = [("Ollama default", 0)] + [
     (f"{size:,}", size) for size in (1024, 4096, 16384, 65536, 262144)
@@ -934,12 +935,12 @@ def run_loop(
         yield None, None, None, str(e), gr.update(visible=False), None, None, None
 
 
-def toggle_history_sidebar(is_visible, selected_id):
+def toggle_history_sidebar(is_visible, selected_id, status=None):
     """Toggle the history sidebar while preserving a valid selection.
 
     Hiding leaves the list untouched; showing reloads it and keeps the
     selection while its generation still exists. Either way a pending delete
-    confirmation is cancelled.
+    confirmation is cancelled, along with its prompt.
     """
     new_visible = not is_visible
     button_text = "Hide History" if new_visible else "History"
@@ -949,6 +950,7 @@ def toggle_history_sidebar(is_visible, selected_id):
         gr.update(visible=new_visible),
         refresh_history(selected_id) if new_visible else gr.update(),
         *hide_delete_confirmation(),
+        "" if status == DELETE_CONFIRMATION_PROMPT else gr.update(),
     )
 
 
@@ -1010,7 +1012,7 @@ def show_delete_confirmation(gen_id):
     return (
         gr.update(visible=False),
         gr.update(visible=True),
-        "Confirm deletion of the selected generation.",
+        DELETE_CONFIRMATION_PROMPT,
     )
 
 
@@ -1510,7 +1512,7 @@ def create_demo(playback_status=None):
         # History sidebar toggle
         history_toggle_event = history_toggle_btn.click(
             toggle_history_sidebar,
-            inputs=[sidebar_visible, history_list],
+            inputs=[sidebar_visible, history_list, history_status],
             outputs=[
                 sidebar_visible,
                 history_toggle_btn,
@@ -1518,6 +1520,7 @@ def create_demo(playback_status=None):
                 history_list,
                 history_actions,
                 delete_confirmation,
+                history_status,
             ],
         )
         history_toggle_event.then(fn=None, js=PIANO_ROLL_RESIZE_JS, queue=False)

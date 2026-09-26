@@ -1277,8 +1277,8 @@ def test_refresh_history_preserves_only_existing_selection(monkeypatch):
 
     assert app.refresh_history("gen_1")["value"] == "gen_1"
     assert app.refresh_history("missing")["value"] is None
-    assert app.toggle_history_sidebar(False, "gen_1")[-1]["value"] == "gen_1"
-    assert app.toggle_history_sidebar(False, "missing")[-1]["value"] is None
+    assert app.toggle_history_sidebar(False, "gen_1")[3]["value"] == "gen_1"
+    assert app.toggle_history_sidebar(False, "missing")[3]["value"] is None
 
 
 def test_hiding_history_leaves_the_list_and_selection_untouched(monkeypatch):
@@ -1289,7 +1289,18 @@ def test_hiding_history_leaves_the_list_and_selection_untouched(monkeypatch):
     )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
-    assert app.toggle_history_sidebar(True, "gen_1")[-1] == {}
+    assert app.toggle_history_sidebar(True, "gen_1")[3] == {}
+
+
+def test_toggling_history_cancels_a_pending_delete(monkeypatch):
+    monkeypatch.setattr(app, "get_history_choices", lambda: [("first", "gen_1")])
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+
+    for is_visible in (True, False):
+        assert app.toggle_history_sidebar(is_visible, "gen_1")[4:] == (
+            {"visible": True},
+            {"visible": False},
+        )
 
 
 def test_delete_requires_confirmation_and_clears_loaded_artifacts(
@@ -1524,6 +1535,11 @@ def test_history_sidebar_uses_one_selector_and_confirmed_delete():
     assert components[actions_id]["props"]["visible"] is True
     assert components[confirmation_id]["props"]["visible"] is False
     assert dependencies["hide_delete_confirmation"]["outputs"] == [
+        actions_id,
+        confirmation_id,
+    ]
+    assert dependencies["toggle_history_sidebar"]["outputs"][3:] == [
+        selector,
         actions_id,
         confirmation_id,
     ]

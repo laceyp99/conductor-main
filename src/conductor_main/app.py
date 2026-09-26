@@ -938,7 +938,8 @@ def toggle_history_sidebar(is_visible, selected_id):
     """Toggle the history sidebar while preserving a valid selection.
 
     Hiding leaves the list untouched; showing reloads it and keeps the
-    selection while its generation still exists.
+    selection while its generation still exists. Either way a pending delete
+    confirmation is cancelled.
     """
     new_visible = not is_visible
     button_text = "Hide History" if new_visible else "History"
@@ -947,6 +948,7 @@ def toggle_history_sidebar(is_visible, selected_id):
         button_text,
         gr.update(visible=new_visible),
         refresh_history(selected_id) if new_visible else gr.update(),
+        *hide_delete_confirmation(),
     )
 
 
@@ -1514,6 +1516,8 @@ def create_demo(playback_status=None):
                 history_toggle_btn,
                 history_sidebar,
                 history_list,
+                history_actions,
+                delete_confirmation,
             ],
         )
         history_toggle_event.then(fn=None, js=PIANO_ROLL_RESIZE_JS, queue=False)

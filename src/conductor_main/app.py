@@ -5,7 +5,7 @@ Features:
 - Text to MIDI generation with multiple AI providers
 - Audio playback of generated MIDI using FluidSynth
 - Session history with persistent storage (up to 20 generations)
-- Toggleable history sidebar panel
+- Collapsible history sidebar panel
 """
 
 import logging
@@ -44,6 +44,7 @@ DEFAULT_TEMPERATURE = 0.1
 CONDUCTOR_APP_DIRNAME = "main"
 MAX_HISTORY_GENERATIONS = 20
 HISTORY_PROMPT_MAX_CHARS = 120
+HISTORY_SIDEBAR_WIDTH = 400
 DELETE_CONFIRMATION_PROMPT = "Confirm deletion of the selected generation."
 # 0 sends no num_ctx, so Ollama's own default applies.
 OLLAMA_CONTEXT_SIZE_CHOICES = [("Ollama default", 0)] + [
@@ -77,23 +78,6 @@ CORE_KEY_TO_UI = {
 }
 APP_CSS = """
 .center-title { text-align: center; font-size: 3em; }
-.app-header {
-    position: relative;
-}
-.app-header .history-toggle {
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    z-index: 1;
-}
-.history-sidebar {
-    background: var(--background-fill-primary);
-    border-left: 1px solid var(--border-color-primary);
-    color: var(--body-text-color);
-    height: 100%;
-    overflow-y: auto;
-}
 .history-list label {
     border: 1px solid var(--border-color-primary);
     border-radius: 8px;
@@ -947,25 +931,6 @@ def run_loop(
         yield None, None, None, str(e), gr.update(visible=False), None, None, None
 
 
-def toggle_history_sidebar(is_visible, selected_id, status=None):
-    """Toggle the history sidebar while preserving a valid selection.
-
-    Hiding leaves the list untouched; showing reloads it and keeps the
-    selection while its generation still exists. Either way a pending delete
-    confirmation is cancelled, along with its prompt.
-    """
-    new_visible = not is_visible
-    button_text = "Hide History" if new_visible else "History"
-    return (
-        new_visible,
-        button_text,
-        gr.update(visible=new_visible),
-        refresh_history(selected_id) if new_visible else gr.update(),
-        *hide_delete_confirmation(),
-        "" if status == DELETE_CONFIRMATION_PROMPT else gr.update(),
-    )
-
-
 def format_history_reasoning(gen, model_info):
     """Format persisted reasoning metadata for a history card."""
     use_thinking = getattr(gen, "use_thinking", None)
@@ -1186,6 +1151,8 @@ def refresh_history(selected_id):
     return gr.update(choices=choices, value=selection)
 
 
+# Plotly only resizes on window resize, but the sidebar slides the page padding
+# without one, so resize again once that transition ends.
 PIANO_ROLL_RESIZE_JS = """
 () => {
     const resizePianoRoll = () => {
@@ -1196,8 +1163,16 @@ PIANO_ROLL_RESIZE_JS = """
         window.dispatchEvent(new Event("resize"));
     };
 
+    const page = document.querySelector(".sidebar-parent");
+    const resizeWhenPageSettles = (event) => {
+        if (event.target !== page) {
+            return;
+        }
+        page.removeEventListener("transitionend", resizeWhenPageSettles);
+        resizePianoRoll();
+    };
+    page?.addEventListener("transitionend", resizeWhenPageSettles);
     requestAnimationFrame(() => requestAnimationFrame(resizePianoRoll));
-    setTimeout(resizePianoRoll, 150);
 }
 """
 
@@ -1211,339 +1186,318 @@ def create_demo(playback_status=None):
     playback_available, _playback_error = playback_status
 
     with gr.Blocks() as demo:
-        # State for sidebar visibility
-        sidebar_visible = gr.State(value=False)
         current_generation_id = gr.State(value=None)
         current_saved_soundfont = gr.State(value=None)
         current_audio_path = gr.State(value=None)
 
-        # Header with title centered on the original full-width layout
-        with gr.Row(elem_classes=["app-header"]):
-            gr.Markdown("<h1 class='center-title'>Conductor</h1>")
-            history_toggle_btn = gr.Button(
-                "History",
-                size="sm",
-                elem_classes=["history-toggle"],
-            )
+        gr.Markdown("<h1 class='center-title'>Conductor</h1>")
 
-        # Main content area with sidebar
-        with gr.Row():
-            # Main content column
-            with gr.Column(scale=3):
-                # Text to MIDI Tab for generating loops based on user input
-                with gr.Tab(label="Text to MIDI"):
-                    gr.Markdown("Generate a loop based on your description.")
-                    with gr.Row(), gr.Accordion("API Keys", open=False):
-                        openai_key_input = gr.Textbox(
-                            lines=1, type="password", label="OpenAI API Key", value=""
-                        )
-                        gemini_key_input = gr.Textbox(
-                            lines=1, type="password", label="Gemini API Key", value=""
-                        )
-                        claude_key_input = gr.Textbox(
-                            lines=1, type="password", label="Claude API Key", value=""
-                        )
-                    with gr.Row():
-                        with gr.Column():
-                            gr.Markdown("## Loop Parameters")
-                            key_input = gr.Dropdown(
-                                choices=KEY_CHOICES,
-                                label="Key",
-                                value="C",
-                            )
-                            mode_input = gr.Dropdown(
-                                choices=["Major", "minor"], label="Scale", value="Major"
-                            )
-                            description_input = gr.Textbox(
-                                label="Description", value="A rhythmic sad pop song"
-                            )
-                        with gr.Column():
-                            gr.Markdown("## Generation Parameters")
-                            default_provider = DEFAULT_PROVIDER
-                            # No model choice selects the provider's first model,
-                            # which is its newest in Core's registry.
-                            default_settings = get_model_settings(
-                                default_provider, None, False
-                            )
-                            # The user's last free temperature, kept while a
-                            # model shows a fixed one, and the active control.
-                            requested_temperature = gr.State(DEFAULT_TEMPERATURE)
-                            reasoning_control = gr.State(
-                                default_settings["reasoning_control"]
-                            )
-                            provider_input = gr.Dropdown(
-                                choices=get_providers(),
-                                label="Provider",
-                                value=default_provider,
-                            )
-                            model_choice_input = gr.Dropdown(
-                                choices=get_model_dropdown_choices(default_provider),
-                                label="Model",
-                                value=default_settings["selected_model"],
-                            )
-                            temp_input = gr.Slider(
-                                0.0,
-                                1.0,
-                                step=0.1,
-                                value=default_settings["temperature_value"],
-                                label="Temperature",
-                                visible=get_temperature_visibility(
-                                    default_settings["show_temperature"]
-                                ),
-                                interactive=default_settings["temperature_interactive"],
-                            )
-                            thinking_checkbox = gr.Checkbox(
-                                label="Reasoning",
-                                value=default_settings["thinking_value"],
-                                visible=default_settings["show_thinking"],
-                            )
-                            effort_input = gr.Dropdown(
-                                choices=default_settings["effort_options"],
-                                label="Reasoning Effort",
-                                value=default_settings["effort_value"],
-                                visible=default_settings["show_effort"],
-                            )
-                            with gr.Accordion(
-                                "Advanced Settings",
-                                open=False,
-                                visible=default_provider == "Ollama",
-                            ) as advanced_settings:
-                                num_ctx_input = gr.Dropdown(
-                                    choices=OLLAMA_CONTEXT_SIZE_CHOICES,
-                                    label="Ollama Context Size",
-                                    value=0,
-                                )
-                    with gr.Row():
-                        prog_button = gr.Button("Generate Loop", variant="primary")
-                        stop_waiting_button = gr.Button(
-                            "Stop Waiting", variant="stop", visible=False
-                        )
-
-                    # Output section
-                    with gr.Row(), gr.Column():
-                        prog_output = gr.File(label="Download Generated MIDI")
-                        # Audio playback component
-                        audio_output = gr.Audio(
-                            label="Playback",
-                            type="filepath",
-                            interactive=False,
-                            loop=True,
-                        )
-                        # Show playback status if not available
-                        if not playback_available:
-                            gr.Markdown(
-                                f"*{get_soundfont_status_message(default_soundfont)}*",
-                                elem_classes=["warning-text"],
-                            )
-
-                    with gr.Row(equal_height=False):
-                        soundfont_input = gr.Dropdown(
-                            choices=get_soundfont_choices(),
-                            label="SoundFont",
-                            value=default_soundfont,
-                            interactive=True,
-                        )
-                        with gr.Column():
-                            refresh_soundfonts_button = gr.Button("Refresh SoundFonts")
-                            rerender_button = gr.Button(
-                                "Re-render Audio",
-                                interactive=rerender_available(default_soundfont, None),
-                            )
-
-                    vis_output = gr.Plot(
-                        label="MIDI Visualization", elem_id="piano-roll"
+        # Text to MIDI Tab for generating loops based on user input
+        with gr.Tab(label="Text to MIDI"):
+            gr.Markdown("Generate a loop based on your description.")
+            with gr.Row(), gr.Accordion("API Keys", open=False):
+                openai_key_input = gr.Textbox(
+                    lines=1, type="password", label="OpenAI API Key", value=""
+                )
+                gemini_key_input = gr.Textbox(
+                    lines=1, type="password", label="Gemini API Key", value=""
+                )
+                claude_key_input = gr.Textbox(
+                    lines=1, type="password", label="Claude API Key", value=""
+                )
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("## Loop Parameters")
+                    key_input = gr.Dropdown(
+                        choices=KEY_CHOICES,
+                        label="Key",
+                        value="C",
                     )
-                    error_message = gr.Textbox(label="Status", interactive=False)
-
-                    # Every model control refreshes the dependent controls from
-                    # the current choices, so they carry over where supported.
-                    control_inputs = [
-                        provider_input,
-                        model_choice_input,
-                        thinking_checkbox,
-                        effort_input,
-                        requested_temperature,
-                        reasoning_control,
-                    ]
-                    control_outputs = [
-                        model_choice_input,
-                        temp_input,
-                        thinking_checkbox,
-                        effort_input,
-                        reasoning_control,
-                    ]
-                    provider_input.input(
-                        sync_controls_for_provider,
-                        inputs=[
-                            control
-                            for control in control_inputs
-                            if control is not model_choice_input
-                        ],
-                        outputs=control_outputs,
+                    mode_input = gr.Dropdown(
+                        choices=["Major", "minor"], label="Scale", value="Major"
                     )
-                    for control, sync_controls in (
-                        (model_choice_input, sync_controls_for_model),
-                        (effort_input, sync_controls_for_effort),
-                        (thinking_checkbox, sync_controls_for_thinking),
-                    ):
-                        control.input(
-                            sync_controls,
-                            inputs=control_inputs,
-                            outputs=control_outputs,
-                        )
-                    # A locked slider takes no input, so this holds the free value.
-                    temp_input.input(
-                        lambda value: value,
-                        inputs=temp_input,
-                        outputs=requested_temperature,
+                    description_input = gr.Textbox(
+                        label="Description", value="A rhythmic sad pop song"
                     )
-                    # .change also covers provider updates from loading history.
-                    provider_input.change(
-                        sync_context_size_for_provider,
-                        inputs=provider_input,
-                        outputs=advanced_settings,
+                with gr.Column():
+                    gr.Markdown("## Generation Parameters")
+                    default_provider = DEFAULT_PROVIDER
+                    # No model choice selects the provider's first model,
+                    # which is its newest in Core's registry.
+                    default_settings = get_model_settings(default_provider, None, False)
+                    # The user's last free temperature, kept while a
+                    # model shows a fixed one, and the active control.
+                    requested_temperature = gr.State(DEFAULT_TEMPERATURE)
+                    reasoning_control = gr.State(default_settings["reasoning_control"])
+                    provider_input = gr.Dropdown(
+                        choices=get_providers(),
+                        label="Provider",
+                        value=default_provider,
                     )
-                    # When the user clicks the button, run the loop generation function based on the current inputs.
-                    # Capture the event so the stop-waiting button can detach the UI from the in-flight request.
-                    gen_event = prog_button.click(
-                        run_loop,
-                        inputs=[
-                            key_input,
-                            mode_input,
-                            description_input,
-                            temp_input,
-                            model_choice_input,
-                            thinking_checkbox,
-                            effort_input,
-                            soundfont_input,
-                            openai_key_input,
-                            gemini_key_input,
-                            claude_key_input,
-                            num_ctx_input,
-                            provider_input,
-                        ],
-                        outputs=[
-                            prog_output,
-                            audio_output,
-                            vis_output,
-                            error_message,
-                            stop_waiting_button,
-                            current_generation_id,
-                            current_saved_soundfont,
-                            current_audio_path,
-                        ],
+                    model_choice_input = gr.Dropdown(
+                        choices=get_model_dropdown_choices(default_provider),
+                        label="Model",
+                        value=default_settings["selected_model"],
                     )
-                    # Stop Waiting detaches the UI from the API response wait and hides itself.
-                    stop_waiting_button.click(
-                        fn=lambda: (
-                            None,
-                            None,
-                            None,
-                            "Stopped waiting. The provider request may still finish in the background.",
-                            gr.update(visible=False),
-                            None,
-                            None,
-                            None,
+                    temp_input = gr.Slider(
+                        0.0,
+                        1.0,
+                        step=0.1,
+                        value=default_settings["temperature_value"],
+                        label="Temperature",
+                        visible=get_temperature_visibility(
+                            default_settings["show_temperature"]
                         ),
-                        outputs=[
-                            prog_output,
-                            audio_output,
-                            vis_output,
-                            error_message,
-                            stop_waiting_button,
-                            current_generation_id,
-                            current_saved_soundfont,
-                            current_audio_path,
-                        ],
-                        cancels=[gen_event],
-                    ).then(
-                        get_rerender_button_update,
-                        inputs=[soundfont_input, prog_output],
-                        outputs=[rerender_button],
+                        interactive=default_settings["temperature_interactive"],
                     )
-                    rerender_button.click(
-                        rerender_current_audio,
-                        inputs=[
-                            prog_output,
-                            soundfont_input,
-                            current_saved_soundfont,
-                            current_generation_id,
-                            current_audio_path,
-                        ],
-                        outputs=[
-                            audio_output,
-                            error_message,
-                            current_saved_soundfont,
-                            current_audio_path,
-                        ],
+                    thinking_checkbox = gr.Checkbox(
+                        label="Reasoning",
+                        value=default_settings["thinking_value"],
+                        visible=default_settings["show_thinking"],
                     )
-                    refresh_soundfonts_button.click(
-                        refresh_soundfont_controls,
-                        inputs=[soundfont_input, prog_output],
-                        outputs=[soundfont_input, rerender_button, error_message],
+                    effort_input = gr.Dropdown(
+                        choices=default_settings["effort_options"],
+                        label="Reasoning Effort",
+                        value=default_settings["effort_value"],
+                        visible=default_settings["show_effort"],
                     )
-
-                # Prompt Editor Tab to allow users to edit the system prompts used in the generation process
-                with gr.Tab(label="Prompt Editor"):
-                    gr.Markdown("## Edit System Prompt")
-                    loop_gen_text = get_prompt_editor_text()
-                    # Create text boxes for the user to edit the prompts
-                    gr.Markdown("### Loop Generation Prompt")
-                    gr.Markdown(
-                        "This prompt is used to generate the loop based on the description."
-                    )
-                    loop_gen_input = gr.Textbox(lines=30, value=loop_gen_text)
-                    save_button = gr.Button("Save Prompt")
-                    save_status = gr.Textbox(label="Status", interactive=False)
-                    # When the user clicks the save button, save the current prompts in the textboxes to the text files
-                    save_button.click(
-                        save_prompts,
-                        inputs=[loop_gen_input],
-                        outputs=[save_status],
-                    )
-
-            # History sidebar (initially hidden)
-            with gr.Column(
-                scale=1,
-                # Room for the model line beside the radio and label padding.
-                min_width=360,
-                visible=False,
-                elem_classes=["history-sidebar"],
-            ) as history_sidebar:
-                gr.Markdown("## History")
-
-                with gr.Row() as history_actions:
-                    load_btn = gr.Button("Load", size="sm", variant="primary")
-                    delete_btn = gr.Button("Delete...", size="sm", variant="stop")
-                    refresh_btn = gr.Button("Refresh", size="sm")
-                with gr.Row(visible=False) as delete_confirmation:
-                    confirm_delete_btn = gr.Button(
-                        "Confirm Delete", size="sm", variant="stop"
-                    )
-                    cancel_delete_btn = gr.Button("Cancel", size="sm")
-                history_status = gr.Textbox(label="History status", interactive=False)
-                history_list = gr.Radio(
-                    label="Recent Generations",
-                    choices=get_history_choices(),
-                    interactive=True,
-                    elem_classes=["history-list"],
+                    with gr.Accordion(
+                        "Advanced Settings",
+                        open=False,
+                        visible=default_provider == "Ollama",
+                    ) as advanced_settings:
+                        num_ctx_input = gr.Dropdown(
+                            choices=OLLAMA_CONTEXT_SIZE_CHOICES,
+                            label="Ollama Context Size",
+                            value=0,
+                        )
+            with gr.Row():
+                prog_button = gr.Button("Generate Loop", variant="primary")
+                stop_waiting_button = gr.Button(
+                    "Stop Waiting", variant="stop", visible=False
                 )
 
-        # History sidebar toggle
-        history_toggle_event = history_toggle_btn.click(
-            toggle_history_sidebar,
-            inputs=[sidebar_visible, history_list, history_status],
-            outputs=[
-                sidebar_visible,
-                history_toggle_btn,
-                history_sidebar,
-                history_list,
-                history_actions,
-                delete_confirmation,
-                history_status,
-            ],
+            # Output section
+            with gr.Row(), gr.Column():
+                prog_output = gr.File(label="Download Generated MIDI")
+                # Audio playback component
+                audio_output = gr.Audio(
+                    label="Playback",
+                    type="filepath",
+                    interactive=False,
+                    loop=True,
+                )
+                # Show playback status if not available
+                if not playback_available:
+                    gr.Markdown(
+                        f"*{get_soundfont_status_message(default_soundfont)}*",
+                        elem_classes=["warning-text"],
+                    )
+
+            with gr.Row(equal_height=False):
+                soundfont_input = gr.Dropdown(
+                    choices=get_soundfont_choices(),
+                    label="SoundFont",
+                    value=default_soundfont,
+                    interactive=True,
+                )
+                with gr.Column():
+                    refresh_soundfonts_button = gr.Button("Refresh SoundFonts")
+                    rerender_button = gr.Button(
+                        "Re-render Audio",
+                        interactive=rerender_available(default_soundfont, None),
+                    )
+
+            vis_output = gr.Plot(label="MIDI Visualization", elem_id="piano-roll")
+            error_message = gr.Textbox(label="Status", interactive=False)
+
+            # Every model control refreshes the dependent controls from
+            # the current choices, so they carry over where supported.
+            control_inputs = [
+                provider_input,
+                model_choice_input,
+                thinking_checkbox,
+                effort_input,
+                requested_temperature,
+                reasoning_control,
+            ]
+            control_outputs = [
+                model_choice_input,
+                temp_input,
+                thinking_checkbox,
+                effort_input,
+                reasoning_control,
+            ]
+            provider_input.input(
+                sync_controls_for_provider,
+                inputs=[
+                    control
+                    for control in control_inputs
+                    if control is not model_choice_input
+                ],
+                outputs=control_outputs,
+            )
+            for control, sync_controls in (
+                (model_choice_input, sync_controls_for_model),
+                (effort_input, sync_controls_for_effort),
+                (thinking_checkbox, sync_controls_for_thinking),
+            ):
+                control.input(
+                    sync_controls,
+                    inputs=control_inputs,
+                    outputs=control_outputs,
+                )
+            # A locked slider takes no input, so this holds the free value.
+            temp_input.input(
+                lambda value: value,
+                inputs=temp_input,
+                outputs=requested_temperature,
+            )
+            # .change also covers provider updates from loading history.
+            provider_input.change(
+                sync_context_size_for_provider,
+                inputs=provider_input,
+                outputs=advanced_settings,
+            )
+            # When the user clicks the button, run the loop generation function based on the current inputs.
+            # Capture the event so the stop-waiting button can detach the UI from the in-flight request.
+            gen_event = prog_button.click(
+                run_loop,
+                inputs=[
+                    key_input,
+                    mode_input,
+                    description_input,
+                    temp_input,
+                    model_choice_input,
+                    thinking_checkbox,
+                    effort_input,
+                    soundfont_input,
+                    openai_key_input,
+                    gemini_key_input,
+                    claude_key_input,
+                    num_ctx_input,
+                    provider_input,
+                ],
+                outputs=[
+                    prog_output,
+                    audio_output,
+                    vis_output,
+                    error_message,
+                    stop_waiting_button,
+                    current_generation_id,
+                    current_saved_soundfont,
+                    current_audio_path,
+                ],
+            )
+            # Stop Waiting detaches the UI from the API response wait and hides itself.
+            stop_waiting_button.click(
+                fn=lambda: (
+                    None,
+                    None,
+                    None,
+                    "Stopped waiting. The provider request may still finish in the background.",
+                    gr.update(visible=False),
+                    None,
+                    None,
+                    None,
+                ),
+                outputs=[
+                    prog_output,
+                    audio_output,
+                    vis_output,
+                    error_message,
+                    stop_waiting_button,
+                    current_generation_id,
+                    current_saved_soundfont,
+                    current_audio_path,
+                ],
+                cancels=[gen_event],
+            ).then(
+                get_rerender_button_update,
+                inputs=[soundfont_input, prog_output],
+                outputs=[rerender_button],
+            )
+            rerender_button.click(
+                rerender_current_audio,
+                inputs=[
+                    prog_output,
+                    soundfont_input,
+                    current_saved_soundfont,
+                    current_generation_id,
+                    current_audio_path,
+                ],
+                outputs=[
+                    audio_output,
+                    error_message,
+                    current_saved_soundfont,
+                    current_audio_path,
+                ],
+            )
+            refresh_soundfonts_button.click(
+                refresh_soundfont_controls,
+                inputs=[soundfont_input, prog_output],
+                outputs=[soundfont_input, rerender_button, error_message],
+            )
+
+        # Prompt Editor Tab to allow users to edit the system prompts used in the generation process
+        with gr.Tab(label="Prompt Editor"):
+            gr.Markdown("## Edit System Prompt")
+            loop_gen_text = get_prompt_editor_text()
+            # Create text boxes for the user to edit the prompts
+            gr.Markdown("### Loop Generation Prompt")
+            gr.Markdown(
+                "This prompt is used to generate the loop based on the description."
+            )
+            loop_gen_input = gr.Textbox(lines=30, value=loop_gen_text)
+            save_button = gr.Button("Save Prompt")
+            save_status = gr.Textbox(label="Status", interactive=False)
+            # When the user clicks the save button, save the current prompts in the textboxes to the text files
+            save_button.click(
+                save_prompts,
+                inputs=[loop_gen_input],
+                outputs=[save_status],
+            )
+
+        # Collapsed history sidebar; its children stay mounted while hidden.
+        with gr.Sidebar(
+            label="History",
+            open=False,
+            position="right",
+            # Room for the model line beside the radio and label padding.
+            width=HISTORY_SIDEBAR_WIDTH,
+        ) as history_sidebar:
+            gr.Markdown("## History")
+
+            with gr.Row() as history_actions:
+                load_btn = gr.Button("Load", size="sm", variant="primary")
+                delete_btn = gr.Button("Delete...", size="sm", variant="stop")
+                refresh_btn = gr.Button("Refresh", size="sm")
+            with gr.Row(visible=False) as delete_confirmation:
+                confirm_delete_btn = gr.Button(
+                    "Confirm Delete", size="sm", variant="stop"
+                )
+                cancel_delete_btn = gr.Button("Cancel", size="sm")
+            history_status = gr.Textbox(label="History status", interactive=False)
+            history_list = gr.Radio(
+                label="Recent Generations",
+                choices=get_history_choices(),
+                interactive=True,
+                elem_classes=["history-list"],
+            )
+
+        # Opening reloads entries and keeps the selection while it still exists.
+        history_sidebar.expand(
+            refresh_history,
+            inputs=[history_list],
+            outputs=[history_list],
         )
-        history_toggle_event.then(fn=None, js=PIANO_ROLL_RESIZE_JS, queue=False)
+        # Opening or closing the sidebar narrows or widens the main column.
+        gr.on(
+            [history_sidebar.expand, history_sidebar.collapse],
+            fn=None,
+            js=PIANO_ROLL_RESIZE_JS,
+            queue=False,
+        )
 
         # .input fires only on user selection, not on programmatic list updates.
         history_list.input(

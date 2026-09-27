@@ -1298,33 +1298,6 @@ def test_refresh_history_preserves_only_existing_selection(monkeypatch):
 
     assert app.refresh_history("gen_1")["value"] == "gen_1"
     assert app.refresh_history("missing")["value"] is None
-    assert app.toggle_history_sidebar(False, "gen_1")[3]["value"] == "gen_1"
-    assert app.toggle_history_sidebar(False, "missing")[3]["value"] is None
-
-
-def test_hiding_history_leaves_the_list_and_selection_untouched(monkeypatch):
-    monkeypatch.setattr(
-        app,
-        "get_history_choices",
-        lambda: (_ for _ in ()).throw(AssertionError("must not reload on hide")),
-    )
-    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
-
-    assert app.toggle_history_sidebar(True, "gen_1")[3] == {}
-
-
-def test_toggling_history_cancels_a_pending_delete(monkeypatch):
-    monkeypatch.setattr(app, "get_history_choices", lambda: [("first", "gen_1")])
-    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
-
-    for is_visible in (True, False):
-        assert app.toggle_history_sidebar(
-            is_visible, "gen_1", app.DELETE_CONFIRMATION_PROMPT
-        )[4:] == ({"visible": True}, {"visible": False}, "")
-        assert (
-            app.toggle_history_sidebar(is_visible, "gen_1", "Loaded generation.")[-1]
-            == {}
-        )
 
 
 def test_delete_requires_confirmation_and_clears_loaded_artifacts(
@@ -1503,17 +1476,53 @@ def test_refresh_soundfont_controls_stays_disabled_after_active_delete(monkeypat
     assert rerender_update["interactive"] is False
 
 
-def test_history_toggle_resizes_piano_roll_after_sidebar_update():
-    demo = app.create_demo(playback_status=(True, None))
-    dependencies = demo.config["dependencies"]
-    toggle_dependency = next(
-        dependency
-        for dependency in dependencies
-        if dependency["api_name"] == "toggle_history_sidebar"
+def _history_sidebar(demo):
+    return next(
+        component
+        for component in demo.config["components"]
+        if component["type"] == "sidebar"
     )
+
+
+def test_history_sidebar_starts_collapsed_on_the_right():
+    demo = app.create_demo(playback_status=(True, None))
+    sidebar = _history_sidebar(demo)
+
+    assert sidebar["props"]["open"] is False
+    assert sidebar["props"]["position"] == "right"
+    assert sidebar["props"]["width"] == app.HISTORY_SIDEBAR_WIDTH
+    assert not any(
+        component["type"] == "button" and component["props"].get("value") == "History"
+        for component in demo.config["components"]
+    )
+
+
+def test_opening_history_reloads_entries_and_keeps_a_valid_selection():
+    demo = app.create_demo(playback_status=(True, None))
+    sidebar_id = _history_sidebar(demo)["id"]
+    selector = next(
+        dependency["inputs"][0]
+        for dependency in demo.config["dependencies"]
+        if dependency["api_name"] == "load_history_item"
+    )
+    reload_dependency = next(
+        dependency
+        for dependency in demo.config["dependencies"]
+        if (sidebar_id, "expand") in dependency["targets"] and not dependency["js"]
+    )
+
+    assert reload_dependency["api_name"] == "refresh_history"
+    assert reload_dependency["targets"] == [(sidebar_id, "expand")]
+    assert reload_dependency["inputs"] == [selector]
+    assert reload_dependency["outputs"] == [selector]
+
+
+def test_history_sidebar_resizes_piano_roll_when_opened_or_closed():
+    demo = app.create_demo(playback_status=(True, None))
+    sidebar_id = _history_sidebar(demo)["id"]
     resize_dependency = next(
         dependency
-        for dependency in dependencies
+        for dependency in demo.config["dependencies"]
         if dependency["js"] == app.PIANO_ROLL_RESIZE_JS
     )
 
@@ -1524,7 +1533,10 @@ def test_history_toggle_resizes_piano_roll_after_sidebar_update():
     )
 
     assert piano_roll["type"] == "plot"
-    assert resize_dependency["trigger_after"] == toggle_dependency["id"]
+    assert resize_dependency["targets"] == [
+        (sidebar_id, "expand"),
+        (sidebar_id, "collapse"),
+    ]
     assert resize_dependency["queue"] is False
 
 
@@ -1562,17 +1574,8 @@ def test_history_sidebar_uses_one_selector_and_confirmed_delete():
         actions_id,
         confirmation_id,
     ]
-    # Programmatic list updates (delete, refresh, toggle) must not reset status.
+    # Programmatic list updates (delete, refresh, open) must not reset status.
     assert dependencies["select_history_item"]["targets"] == [(selector, "input")]
-    assert dependencies["toggle_history_sidebar"]["outputs"][3:6] == [
-        selector,
-        actions_id,
-        confirmation_id,
-    ]
-    assert (
-        dependencies["toggle_history_sidebar"]["inputs"][2]
-        == dependencies["toggle_history_sidebar"]["outputs"][6]
-    )
     assert dependencies["cancel_delete_confirmation"]["outputs"][:2] == [
         actions_id,
         confirmation_id,

@@ -1164,14 +1164,14 @@ PIANO_ROLL_RESIZE_JS = """
     };
 
     const page = document.querySelector(".sidebar-parent");
-    const resizeWhenPageSettles = (event) => {
-        if (event.target !== page) {
-            return;
-        }
-        page.removeEventListener("transitionend", resizeWhenPageSettles);
-        resizePianoRoll();
-    };
-    page?.addEventListener("transitionend", resizeWhenPageSettles);
+    if (page) {
+        // Each toggle replaces the one handler, even when no transition runs.
+        page.ontransitionend = (event) => {
+            if (event.target === page) {
+                resizePianoRoll();
+            }
+        };
+    }
     requestAnimationFrame(() => requestAnimationFrame(resizePianoRoll));
 }
 """

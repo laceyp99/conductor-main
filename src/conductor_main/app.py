@@ -78,6 +78,27 @@ CORE_KEY_TO_UI = {
 }
 APP_CSS = """
 .center-title { text-align: center; font-size: 3em; }
+/* Label the collapsed sidebar tab. This styles Gradio 6.20's Sidebar markup
+   (.toggle-button, .chevron); if that changes, the tab falls back to an arrow.
+   Gradio flips the whole tab to point the arrow, so flip only the arrow here. */
+.sidebar.history-sidebar.right:not(.open) .toggle-button {
+    border-left: 1px solid var(--border-color-primary);
+    border-radius: var(--size-8) 0 0 var(--size-8);
+    border-right: none;
+    color: var(--body-text-color);
+    font-size: var(--text-md);
+    font-weight: var(--weight-semibold);
+    gap: var(--size-1);
+    padding: 0 var(--size-3);
+    transform: none;
+    width: auto;
+}
+.sidebar.history-sidebar.right:not(.open) .toggle-button .chevron {
+    transform: rotate(180deg);
+}
+.sidebar.history-sidebar.right:not(.open) .toggle-button::after {
+    content: "History";
+}
 .history-list label {
     border: 1px solid var(--border-color-primary);
     border-radius: 8px;
@@ -1465,6 +1486,7 @@ def create_demo(playback_status=None):
             position="right",
             # Room for the model line beside the radio and label padding.
             width=HISTORY_SIDEBAR_WIDTH,
+            elem_classes=["history-sidebar"],
         ) as history_sidebar:
             gr.Markdown("## History")
 

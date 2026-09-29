@@ -1491,6 +1491,12 @@ def test_history_sidebar_starts_collapsed_on_the_right():
     assert sidebar["props"]["open"] is False
     assert sidebar["props"]["position"] == "right"
     assert sidebar["props"]["width"] == app.HISTORY_SIDEBAR_WIDTH
+    # The collapsed tab's "History" label is CSS keyed to this class.
+    assert "history-sidebar" in sidebar["props"]["elem_classes"]
+    assert (
+        ".sidebar.history-sidebar.right:not(.open) .toggle-button::after {\n"
+        '    content: "History";'
+    ) in app.APP_CSS
     assert not any(
         component["type"] == "button" and component["props"].get("value") == "History"
         for component in demo.config["components"]

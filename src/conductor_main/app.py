@@ -1482,6 +1482,13 @@ def create_demo(playback_status=None):
                         inputs=[soundfont_input, prog_output],
                         outputs=[soundfont_input, rerender_button, error_message],
                     )
+                    # Rewind on pause so the next Play starts from the beginning.
+                    audio_output.pause(
+                        lambda: gr.update(playback_position=0),
+                        outputs=[audio_output],
+                        queue=False,
+                        show_progress="hidden",
+                    )
 
                 # Prompt Editor Tab to allow users to edit the system prompts used in the generation process
                 with gr.Tab(label="Prompt Editor"):

@@ -13,7 +13,7 @@
 The completed view provides:
 
 - **Download Generated MIDI**: Import the loop into a DAW.
-- **Playback**: Play rendered audio when audio synthesis succeeds.
+- **Playback**: Play rendered audio when audio synthesis succeeds. Pausing rewinds to the start; scrub while paused to play from another point.
 - **MIDI Visualization**: An interactive four-bar piano roll powered by Plotly.
 - **Status**: Concise feedback on provider, parsing, rendering, or configuration issues.
 

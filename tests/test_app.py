@@ -1540,6 +1540,27 @@ def test_audio_playback_loops_generated_audio():
     assert audio["props"]["loop"] is True
 
 
+def test_audio_playback_rewinds_on_pause():
+    demo = app.create_demo(playback_status=(True, None))
+    audio = next(
+        component
+        for component in demo.config["components"]
+        if component["type"] == "audio"
+        and component["props"].get("label") == "Playback"
+    )
+    dependency = next(
+        dependency
+        for dependency in demo.config["dependencies"]
+        if dependency["api_name"] == "rewind_playback"
+    )
+
+    assert dependency["targets"] == [(audio["id"], "pause")]
+    assert dependency["outputs"] == [audio["id"]]
+    # Unqueued so the rewind is not held behind a running generation.
+    assert dependency["queue"] is False
+    assert app.rewind_playback()["playback_position"] == 0
+
+
 def test_history_sidebar_uses_one_selector_and_confirmed_delete():
     demo = app.create_demo(playback_status=(True, None))
     components = {component["id"]: component for component in demo.config["components"]}

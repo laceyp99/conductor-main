@@ -1186,6 +1186,11 @@ def refresh_history(selected_id):
     return gr.update(choices=choices, value=selection)
 
 
+def rewind_playback():
+    """Rewind paused audio so the next Play starts from the beginning."""
+    return gr.update(playback_position=0)
+
+
 PIANO_ROLL_RESIZE_JS = """
 () => {
     const resizePianoRoll = () => {
@@ -1481,6 +1486,12 @@ def create_demo(playback_status=None):
                         refresh_soundfont_controls,
                         inputs=[soundfont_input, prog_output],
                         outputs=[soundfont_input, rerender_button, error_message],
+                    )
+                    audio_output.pause(
+                        rewind_playback,
+                        outputs=[audio_output],
+                        queue=False,
+                        show_progress="hidden",
                     )
 
                 # Prompt Editor Tab to allow users to edit the system prompts used in the generation process

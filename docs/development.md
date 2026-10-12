@@ -23,6 +23,10 @@ The package entry point is `conductor_main.app:main`. UI-specific visualization 
 - Install Core with the relevant provider extra or `providers`.
 - Enter the key in the API Keys accordion or set the environment variable.
 - For Ollama, confirm the server is running and has at least one model installed.
+- Ollama discovery uses a three-second timeout per network operation. A discovery
+  failure leaves cloud providers available; selecting or restoring Ollama reports
+  a warning. A model inspection failure hides reasoning controls and reports a
+  warning. Core rejects generation if the selected model cannot be inspected.
 
 ### An Ollama model ran out of context
 

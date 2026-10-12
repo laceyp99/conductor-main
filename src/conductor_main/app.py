@@ -23,6 +23,7 @@ from conductor_core import (
     GenerationRequest,
     LoopGenerationEngine,
     ProviderCredentials,
+    ProviderError,
 )
 from conductor_core.music import ENHARMONIC_NOTE_NAMES, get_loop_prompt, get_model_info
 from conductor_core.playback import (
@@ -288,22 +289,23 @@ def get_history_control_updates(gen):
         key_update = gr.update(value=ui_key)
 
     provider_choices = list(known_models)
-    ollama_status = (
-        ollama_api.get_ollama_status(request_timeout=3.0)
-        if provider == "Ollama"
-        else None
-    )
-    if ollama_status and ollama_status["available"]:
+    ollama_models = []
+    ollama_available = False
+    if provider == "Ollama":
+        try:
+            ollama_models = ollama_api.get_model_list(request_timeout=3.0)
+            ollama_available = True
+        except (ProviderError, ImportError):
+            warnings.append("Ollama discovery failed; check the service and SDK.")
+    if ollama_available:
         provider_choices.append("Ollama")
-    provider_is_available = provider in known_models or bool(
-        ollama_status and ollama_status["available"]
-    )
+    provider_is_available = provider in known_models or ollama_available
     if not provider_is_available:
         provider_choices.append((f"{provider} (unavailable)", provider))
 
     if provider_is_available:
         provider_models = (
-            ollama_status["models"] if provider == "Ollama" else known_models[provider]
+            ollama_models if provider == "Ollama" else known_models[provider]
         )
         model_choices = [
             (format_model_label(provider, model_name), model_name)
@@ -398,7 +400,12 @@ def get_providers():
     model_info = get_model_info()
     providers = list(model_info["models"].keys())
     # get_model_list() lists names without inspecting every installed model.
-    if ollama_api.get_model_list():
+    try:
+        ollama_models = ollama_api.get_model_list(request_timeout=3.0)
+    except (ProviderError, ImportError):
+        # Ollama is optional; unavailable local discovery must not block startup.
+        ollama_models = []
+    if ollama_models:
         providers.append("Ollama")
     return providers
 
@@ -413,7 +420,11 @@ def get_models_for_provider(provider):
         list: List of model names for the provider.
     """
     if provider == "Ollama":
-        return ollama_api.get_model_list()
+        try:
+            return ollama_api.get_model_list(request_timeout=3.0)
+        except (ProviderError, ImportError):
+            gr.Warning("Ollama discovery failed; check the service and SDK.")
+            return []
     model_info = get_model_info()
     if provider in model_info["models"]:
         return list(model_info["models"][provider].keys())
@@ -431,7 +442,20 @@ def get_selected_model(provider, model_choice):
 def get_model_config(provider, model):
     """Return Core's reasoning and temperature metadata for one model."""
     if provider == "Ollama":
-        return ollama_api.get_model_status(model)["model_capabilities"] or {}
+        try:
+            inspection = ollama_api.get_model_status(model, request_timeout=3.0)
+        except (ProviderError, ImportError):
+            gr.Warning("Ollama discovery failed; check the service and SDK.")
+            return {}
+        if inspection is None:
+            gr.Warning("The selected Ollama model is no longer installed.")
+            return {}
+        if inspection.error is not None:
+            gr.Warning(
+                "Ollama model inspection failed; reasoning controls are unavailable."
+            )
+            return {}
+        return inspection.capabilities
     return get_model_info()["models"].get(provider, {}).get(model, {})
 
 

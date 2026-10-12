@@ -2,7 +2,9 @@ from pathlib import Path
 from threading import Event, Thread
 from types import SimpleNamespace
 
+import pytest
 from conductor_core import AudioRenderingError, GenerationMetadata
+from conductor_core.errors import ProviderConnectionError
 
 from conductor_main import app
 
@@ -503,19 +505,24 @@ def test_provider_none_effort_keeps_thinking_on_for_core(monkeypatch):
 
 def test_model_settings_inspect_only_the_selected_ollama_model(monkeypatch):
     inspected = []
-    monkeypatch.setattr(app.ollama_api, "get_model_list", lambda: ["gpt-oss", "qwen3"])
+    monkeypatch.setattr(
+        app.ollama_api, "get_model_list", lambda request_timeout: ["gpt-oss", "qwen3"]
+    )
 
-    def get_model_status(model):
+    def get_model_status(model, request_timeout):
+        assert request_timeout == 3.0
         inspected.append(model)
-        return {
-            "model_capabilities": {
+        return app.ollama_api.OllamaModelInspection(
+            model,
+            {
                 "extended_thinking": True,
                 "effort_options": ["low", "medium", "high"],
                 "temperature_supported": True,
                 "thinking_fixed_temperature": None,
                 "thinking_off": "lowest_effort",
-            }
-        }
+            },
+            None,
+        )
 
     monkeypatch.setattr(app.ollama_api, "get_model_status", get_model_status)
 
@@ -531,11 +538,17 @@ def test_model_settings_inspect_only_the_selected_ollama_model(monkeypatch):
 def test_model_settings_show_no_reasoning_for_uninspectable_ollama_model(
     monkeypatch,
 ):
-    monkeypatch.setattr(app.ollama_api, "get_model_list", lambda: ["llama3"])
+    warnings = []
+    monkeypatch.setattr(app.gr, "Warning", warnings.append)
+    monkeypatch.setattr(
+        app.ollama_api, "get_model_list", lambda request_timeout: ["llama3"]
+    )
     monkeypatch.setattr(
         app.ollama_api,
         "get_model_status",
-        lambda model: {"model_capabilities": None},
+        lambda model, request_timeout: app.ollama_api.OllamaModelInspection(
+            model, None, ProviderConnectionError("Ollama", "inspection unavailable")
+        ),
     )
 
     settings = app.get_model_settings("Ollama", "llama3")
@@ -544,10 +557,15 @@ def test_model_settings_show_no_reasoning_for_uninspectable_ollama_model(
     assert settings["show_effort"] is False
     assert settings["thinking_value"] is False
     assert settings["show_temperature"] is True
+    assert warnings == [
+        "Ollama model inspection failed; reasoning controls are unavailable."
+    ]
 
 
 def test_get_providers_does_not_inspect_every_ollama_model(monkeypatch):
-    monkeypatch.setattr(app.ollama_api, "get_model_list", lambda: ["llama3"])
+    monkeypatch.setattr(
+        app.ollama_api, "get_model_list", lambda request_timeout: ["llama3"]
+    )
     monkeypatch.setattr(
         app.ollama_api,
         "get_ollama_status",
@@ -555,6 +573,62 @@ def test_get_providers_does_not_inspect_every_ollama_model(monkeypatch):
     )
 
     assert app.get_providers()[-1] == "Ollama"
+
+
+@pytest.mark.parametrize(
+    "error", [ProviderConnectionError("Ollama", "offline"), ImportError("missing SDK")]
+)
+def test_ollama_listing_failure_keeps_cloud_providers_available(monkeypatch, error):
+    warnings = []
+
+    def unavailable(request_timeout):
+        assert request_timeout == 3.0
+        raise error
+
+    monkeypatch.setattr(app.ollama_api, "get_model_list", unavailable)
+    monkeypatch.setattr(app.gr, "Warning", warnings.append)
+
+    assert app.get_providers() == list(app.get_model_info()["models"])
+    assert app.get_models_for_provider("Ollama") == []
+    assert warnings == ["Ollama discovery failed; check the service and SDK."]
+
+
+def test_empty_ollama_catalog_does_not_report_discovery_failure(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(app.ollama_api, "get_model_list", lambda request_timeout: [])
+    monkeypatch.setattr(app.gr, "Warning", warnings.append)
+
+    assert "Ollama" not in app.get_providers()
+    assert app.get_models_for_provider("Ollama") == []
+    assert warnings == []
+
+
+@pytest.mark.parametrize(
+    "error", [ProviderConnectionError("Ollama", "offline"), ImportError("missing SDK")]
+)
+def test_ollama_inspection_listing_failure_warns_without_guessing(monkeypatch, error):
+    warnings = []
+
+    def unavailable(model, request_timeout):
+        assert request_timeout == 3.0
+        raise error
+
+    monkeypatch.setattr(app.ollama_api, "get_model_status", unavailable)
+    monkeypatch.setattr(app.gr, "Warning", warnings.append)
+
+    assert app.get_model_config("Ollama", "llama3") == {}
+    assert warnings == ["Ollama discovery failed; check the service and SDK."]
+
+
+def test_ollama_model_removed_between_listing_and_inspection(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(
+        app.ollama_api, "get_model_status", lambda model, request_timeout: None
+    )
+    monkeypatch.setattr(app.gr, "Warning", warnings.append)
+
+    assert app.get_model_config("Ollama", "removed") == {}
+    assert warnings == ["The selected Ollama model is no longer installed."]
 
 
 def test_context_size_is_only_shown_for_ollama(monkeypatch):
@@ -840,24 +914,20 @@ def test_history_controls_restore_installed_ollama_without_false_unavailable(
     )
     monkeypatch.setattr(
         app.ollama_api,
-        "get_ollama_status",
-        lambda request_timeout: {
-            "available": True,
-            "models": ["gemma4:e4b", "other:latest"],
-        },
-    )
-    monkeypatch.setattr(
-        app.ollama_api, "get_model_list", lambda: ["gemma4:e4b", "other:latest"]
+        "get_model_list",
+        lambda request_timeout: ["gemma4:e4b", "other:latest"],
     )
     monkeypatch.setattr(
         app.ollama_api,
         "get_model_status",
-        lambda model: {
-            "model_capabilities": {
+        lambda model, request_timeout: app.ollama_api.OllamaModelInspection(
+            model,
+            {
                 "extended_thinking": True,
                 "effort_options": ["low", "medium", "high"],
-            }
-        },
+            },
+            None,
+        ),
     )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
@@ -895,8 +965,8 @@ def test_history_controls_mark_missing_ollama_model_only(monkeypatch):
     )
     monkeypatch.setattr(
         app.ollama_api,
-        "get_ollama_status",
-        lambda request_timeout: {"available": True, "models": ["other:latest"]},
+        "get_model_list",
+        lambda request_timeout: ["other:latest"],
     )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
@@ -925,11 +995,11 @@ def test_history_controls_preserve_ollama_when_service_unreachable(monkeypatch):
     monkeypatch.setattr(
         app, "get_model_info", lambda: {"models": {"OpenAI": {"current-model": {}}}}
     )
-    monkeypatch.setattr(
-        app.ollama_api,
-        "get_ollama_status",
-        lambda request_timeout: {"available": False, "models": []},
-    )
+
+    def unavailable(request_timeout):
+        raise ProviderConnectionError("Ollama", "offline")
+
+    monkeypatch.setattr(app.ollama_api, "get_model_list", unavailable)
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
     updates = app.get_history_control_updates(
@@ -947,7 +1017,10 @@ def test_history_controls_preserve_ollama_when_service_unreachable(monkeypatch):
 
     assert updates.provider["choices"][-1] == ("Ollama (unavailable)", "Ollama")
     assert updates.model["choices"] == [("gemma4:e4b (unavailable)", "gemma4:e4b")]
-    assert updates.warnings == ("Unavailable selection: Ollama / gemma4:e4b.",)
+    assert updates.warnings == (
+        "Ollama discovery failed; check the service and SDK.",
+        "Unavailable selection: Ollama / gemma4:e4b.",
+    )
 
 
 def test_history_store_uses_the_app_retention_policy():

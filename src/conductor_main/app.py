@@ -297,6 +297,8 @@ def get_history_control_updates(gen):
             ollama_available = True
         except (ProviderError, ImportError):
             warnings.append("Ollama discovery failed; check the service and SDK.")
+    else:
+        provider_choices = get_providers()
     if ollama_available:
         provider_choices.append("Ollama")
     provider_is_available = provider in known_models or ollama_available

@@ -980,6 +980,38 @@ def test_history_controls_use_defaults_and_warn_for_legacy_reasoning(monkeypatch
     assert updates.warnings == ("Reasoning settings weren't saved; defaults applied.",)
 
 
+@pytest.mark.parametrize("ollama_available", [True, False])
+def test_cloud_history_keeps_available_providers(monkeypatch, ollama_available):
+    monkeypatch.setattr(
+        app, "get_model_info", lambda: {"models": {"Google": {"cloud-model": {}}}}
+    )
+
+    def discover_models(request_timeout):
+        if not ollama_available:
+            raise ProviderConnectionError("Ollama", "offline")
+        return ["local-model"]
+
+    monkeypatch.setattr(app.ollama_api, "get_model_list", discover_models)
+    updates = app.get_history_control_updates(
+        SimpleNamespace(
+            key="C",
+            scale="Major",
+            prompt="cloud history",
+            provider="Google",
+            model="cloud-model",
+            temperature=0.1,
+            use_thinking=False,
+            effort="low",
+        )
+    )
+
+    expected_providers = ["Google", "Ollama"] if ollama_available else ["Google"]
+    assert updates.provider["choices"] == expected_providers
+    assert updates.provider["value"] == "Google"
+    assert updates.model["value"] == "cloud-model"
+    assert updates.warnings == ()
+
+
 def test_history_controls_restore_installed_ollama_without_false_unavailable(
     monkeypatch,
 ):

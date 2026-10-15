@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from threading import Event, Thread
 from types import SimpleNamespace
@@ -5,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from conductor_core import AudioRenderingError, GenerationMetadata
 from conductor_core.errors import ProviderConnectionError
+from gradio.state_holder import SessionState
 
 from conductor_main import app
 
@@ -314,6 +316,78 @@ def test_model_settings_hide_reasoning_for_always_on_models_without_levels(
     assert settings["show_thinking"] is False
     assert settings["show_effort"] is False
     assert settings["thinking_value"] is True
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"extended_thinking": False},
+        {"extended_thinking": True, "thinking_off": "disabled"},
+        {"extended_thinking": True, "thinking_off": "lowest_effort"},
+    ],
+    ids=["no-reasoning", "toggle", "always-on"],
+)
+@pytest.mark.parametrize("switch_model", [False, True], ids=["initial", "switch"])
+def test_hidden_effort_inputs_pass_gradio_preprocessing(
+    monkeypatch, metadata, switch_model
+):
+    models = {"target-model": metadata}
+    if switch_model:
+        models = {
+            "effort-model": {
+                "extended_thinking": True,
+                "effort_options": ["low", "high"],
+                "thinking_off": "lowest_effort",
+            },
+            **models,
+        }
+    monkeypatch.setattr(app, "get_model_info", lambda: {"models": {"Google": models}})
+    monkeypatch.setattr(app.ollama_api, "get_model_list", lambda request_timeout: [])
+    monkeypatch.setattr(app, "load_history", list)
+    monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: None)
+    monkeypatch.setattr(app, "get_soundfont_choices", list)
+    monkeypatch.setattr(app, "rerender_available", lambda *args: False)
+    monkeypatch.setattr(app, "get_soundfont_status_message", lambda *args: "disabled")
+    demo = app.create_demo(playback_status=(False, "disabled"))
+    state = SessionState(demo)
+    generate = next(fn for fn in demo.fns.values() if fn.fn is app.run_loop)
+    sync = next(fn for fn in demo.fns.values() if fn.fn is app.sync_controls_for_model)
+
+    async def preprocess_controls():
+        if switch_model:
+            await demo.process_api(
+                sync,
+                ["Google", "target-model", True, "high", None, None],
+                state=state,
+            )
+        effort = state[sync.inputs[3]._id]
+        assert effort.visible is False
+        assert effort.allow_custom_value is False
+        inputs = [
+            "C",
+            "Major",
+            "test loop",
+            0.1,
+            "target-model",
+            False,
+            effort.value,
+            None,
+            "",
+            "",
+            "",
+            0,
+            "Google",
+        ]
+        processed = await demo.preprocess_data(generate, inputs, state)
+        assert processed[6] == "low"
+        # The same hidden input must also allow subsequent model-control events.
+        await demo.process_api(
+            sync,
+            ["Google", "target-model", False, effort.value, None, None],
+            state=state,
+        )
+
+    asyncio.run(preprocess_controls())
 
 
 def test_model_settings_show_fixed_temperature_only_while_thinking(monkeypatch):
@@ -904,6 +978,38 @@ def test_history_controls_use_defaults_and_warn_for_legacy_reasoning(monkeypatch
     assert updates.use_thinking == {"visible": True, "value": False}
     assert updates.effort == {"choices": ["low"], "value": "low", "visible": False}
     assert updates.warnings == ("Reasoning settings weren't saved; defaults applied.",)
+
+
+@pytest.mark.parametrize("ollama_available", [True, False])
+def test_cloud_history_keeps_available_providers(monkeypatch, ollama_available):
+    monkeypatch.setattr(
+        app, "get_model_info", lambda: {"models": {"Google": {"cloud-model": {}}}}
+    )
+
+    def discover_models(request_timeout):
+        if not ollama_available:
+            raise ProviderConnectionError("Ollama", "offline")
+        return ["local-model"]
+
+    monkeypatch.setattr(app.ollama_api, "get_model_list", discover_models)
+    updates = app.get_history_control_updates(
+        SimpleNamespace(
+            key="C",
+            scale="Major",
+            prompt="cloud history",
+            provider="Google",
+            model="cloud-model",
+            temperature=0.1,
+            use_thinking=False,
+            effort="low",
+        )
+    )
+
+    expected_providers = ["Google", "Ollama"] if ollama_available else ["Google"]
+    assert updates.provider["choices"] == expected_providers
+    assert updates.provider["value"] == "Google"
+    assert updates.model["value"] == "cloud-model"
+    assert updates.warnings == ()
 
 
 def test_history_controls_restore_installed_ollama_without_false_unavailable(

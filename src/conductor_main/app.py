@@ -297,6 +297,8 @@ def get_history_control_updates(gen):
             ollama_available = True
         except (ProviderError, ImportError):
             warnings.append("Ollama discovery failed; check the service and SDK.")
+    else:
+        provider_choices = get_providers()
     if ollama_available:
         provider_choices.append("Ollama")
     provider_is_available = provider in known_models or ollama_available
@@ -586,7 +588,8 @@ def sync_model_capabilities(
             value=settings["thinking_value"],
         ),
         gr.update(
-            choices=settings["effort_options"] or None,
+            # Hidden inputs still undergo Gradio dropdown validation.
+            choices=settings["effort_options"] or [settings["effort_value"]],
             value=settings["effort_value"],
             visible=settings["show_effort"],
         ),
@@ -1327,7 +1330,8 @@ def create_demo(playback_status=None):
                                 visible=default_settings["show_thinking"],
                             )
                             effort_input = gr.Dropdown(
-                                choices=default_settings["effort_options"],
+                                choices=default_settings["effort_options"]
+                                or [default_settings["effort_value"]],
                                 label="Reasoning Effort",
                                 value=default_settings["effort_value"],
                                 visible=default_settings["show_effort"],

@@ -1424,12 +1424,17 @@ def test_get_rerender_button_update_requires_active_midi(monkeypatch):
 
 
 def test_history_choices_show_context_in_newest_first_order(monkeypatch):
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
+
+    class FixedOffsetTimestamp(datetime):
+        # Pin the "local" timezone to UTC-5 so the test is host-independent.
+        def astimezone(self, tz=None):
+            return super().astimezone(tz or timezone(timedelta(hours=-5)))
 
     entries = [
         SimpleNamespace(
             id=identifier,
-            timestamp=datetime(2026, 1, day, 12, 0, tzinfo=timezone.utc),
+            timestamp=FixedOffsetTimestamp(2026, 1, day, 12, 0, tzinfo=timezone.utc),
             prompt="similar prompt " + identifier,
             key="C",
             scale="Major",
@@ -1444,8 +1449,7 @@ def test_history_choices_show_context_in_newest_first_order(monkeypatch):
     choices = app.get_history_choices()
 
     assert [value for _, value in choices] == ["new", "old"]
-    local_time = entries[0].timestamp.astimezone().strftime("%b %d, %I:%M %p")
-    assert choices[0][0] == f"C Major · {local_time}\nmodel-a\nsimilar prompt new"
+    assert choices[0][0] == "C Major · Jan 02, 07:00 AM\nmodel-a\nsimilar prompt new"
 
 
 def test_history_labels_keep_prompt_on_one_bounded_line(monkeypatch):

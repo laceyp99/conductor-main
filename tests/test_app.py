@@ -1444,7 +1444,8 @@ def test_history_choices_show_context_in_newest_first_order(monkeypatch):
     choices = app.get_history_choices()
 
     assert [value for _, value in choices] == ["new", "old"]
-    assert choices[0][0] == ("C Major · Jan 02, 12:00 PM\nmodel-a\nsimilar prompt new")
+    local_time = entries[0].timestamp.astimezone().strftime("%b %d, %I:%M %p")
+    assert choices[0][0] == f"C Major · {local_time}\nmodel-a\nsimilar prompt new"
 
 
 def test_history_labels_keep_prompt_on_one_bounded_line(monkeypatch):

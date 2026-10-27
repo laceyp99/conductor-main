@@ -509,8 +509,8 @@ wheels = [
 
 [[package]]
 name = "conductor-core"
-version = "0.10.0"
-source = { git = "https://github.com/laceyp99/conductor-core.git?rev=v0.10.0#8480f09827ac5cf410014076427069e1911b34fe" }
+version = "0.12.7"
+source = { git = "https://github.com/laceyp99/conductor-core.git?rev=v0.12.7#38b341fa742a32f2fc4b2bf176924cbb012106f5" }
 dependencies = [
     { name = "mido" },
     { name = "pydantic" },
@@ -518,10 +518,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-playback = [
-    { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
-    { name = "pydub" },
-]
 providers = [
     { name = "anthropic" },
     { name = "google-genai" },
@@ -534,7 +530,7 @@ name = "conductor-main"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "conductor-core", extra = ["playback", "providers"] },
+    { name = "conductor-core", extra = ["providers"] },
     { name = "gradio" },
     { name = "mido" },
     { name = "plotly" },
@@ -551,7 +547,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "conductor-core", extras = ["providers", "playback"], git = "https://github.com/laceyp99/conductor-core.git?rev=v0.10.0" },
+    { name = "conductor-core", extras = ["providers"], git = "https://github.com/laceyp99/conductor-core.git?rev=v0.12.7" },
     { name = "gradio", specifier = "==6.20.0" },
     { name = "mido", specifier = "==1.3.3" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.6,<10" },

@@ -1022,7 +1022,8 @@ def get_history_choices():
     model_info = get_model_info() if history else None
     choices = []
     for gen in history:
-        timestamp = gen.timestamp.strftime("%b %d, %I:%M %p")
+        # Core returns UTC; show the saved time in the local timezone.
+        timestamp = gen.timestamp.astimezone().strftime("%b %d, %I:%M %p")
         # Collapse line breaks so the prompt stays on its own label line; CSS
         # adds the visible ellipsis, and the cap only bounds the label size.
         prompt = " ".join(gen.prompt.split())

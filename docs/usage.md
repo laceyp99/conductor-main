@@ -60,7 +60,7 @@ Conductor Main reads Core's model metadata and adapts its controls when the prov
 
 Models that always reason and offer no effort levels show no reasoning control.
 
-Changing providers resets the model to a valid choice and refreshes dependent controls. Your temperature carries over between models, the reasoning effort carries over when the new model offers that level, and the reasoning toggle carries over between models that have one. A hidden control is intentionally unavailable for that model rather than missing from the installation.
+Changing providers resets the model to a valid choice and refreshes dependent controls. Your temperature carries over between models, the reasoning effort you last picked carries over to any later model that offers that level (even after passing through a model that does not), and the reasoning toggle carries over between models that have one. A hidden control is intentionally unavailable for that model rather than missing from the installation.
 
 Model labels show input and output prices per one million tokens when pricing metadata is available. The saved generation records the provider-reported cost; local Ollama generations normally have zero API cost.
 

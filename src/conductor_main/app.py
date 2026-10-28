@@ -255,6 +255,7 @@ class HistoryControlUpdates:
     use_thinking: object
     effort: object
     requested_temperature: object
+    requested_effort: object
     reasoning_control: object
     warnings: tuple[str, ...]
 
@@ -270,6 +271,7 @@ class HistoryControlUpdates:
             self.use_thinking,
             self.effort,
             self.requested_temperature,
+            self.requested_effort,
             self.reasoning_control,
         )
 
@@ -388,6 +390,7 @@ def get_history_control_updates(gen):
         requested_temperature=gen.temperature
         if settings["temperature_interactive"]
         else gr.update(),
+        requested_effort=effort_value,
         reasoning_control=settings["reasoning_control"],
         warnings=tuple(warnings),
     )
@@ -617,8 +620,11 @@ def sync_controls_for_thinking(*control_values):
 
 
 def sync_controls_for_effort(*control_values):
-    """Refresh dependent controls when the reasoning effort changes."""
-    return sync_model_capabilities(*control_values)
+    """Refresh dependent controls when the reasoning effort changes.
+
+    Also returns the picked effort, which later model events carry over.
+    """
+    return (*sync_model_capabilities(*control_values), control_values[3])
 
 
 def sync_context_size_for_provider(provider):
@@ -1079,9 +1085,9 @@ def load_history_item(gen_id):
                generation_id, saved_soundfont, current_audio_path, rerender_update,
                key_update, scale_update, description_update, provider_update, model_update,
                temperature_update, thinking_update, effort_update,
-               requested_temperature, reasoning_control)
+               requested_temperature, requested_effort, reasoning_control)
     """
-    unchanged_controls = tuple(gr.update() for _ in range(10))
+    unchanged_controls = tuple(gr.update() for _ in range(11))
     if not gen_id:
         return (
             None,
@@ -1301,6 +1307,12 @@ def create_demo(playback_status=None):
                             # The user's last free temperature, kept while a
                             # model shows a fixed one, and the active control.
                             requested_temperature = gr.State(DEFAULT_TEMPERATURE)
+                            # The user's last chosen effort. Model events read this
+                            # rather than the dropdown, whose value can be stale
+                            # against narrowed choices during rapid switching.
+                            requested_effort = gr.State(
+                                default_settings["effort_value"]
+                            )
                             reasoning_control = gr.State(
                                 default_settings["reasoning_control"]
                             )
@@ -1395,7 +1407,7 @@ def create_demo(playback_status=None):
                         provider_input,
                         model_choice_input,
                         thinking_checkbox,
-                        effort_input,
+                        requested_effort,
                         requested_temperature,
                         reasoning_control,
                     ]
@@ -1417,7 +1429,6 @@ def create_demo(playback_status=None):
                     )
                     for control, sync_controls in (
                         (model_choice_input, sync_controls_for_model),
-                        (effort_input, sync_controls_for_effort),
                         (thinking_checkbox, sync_controls_for_thinking),
                     ):
                         control.input(
@@ -1425,6 +1436,14 @@ def create_demo(playback_status=None):
                             inputs=control_inputs,
                             outputs=control_outputs,
                         )
+                    effort_input.input(
+                        sync_controls_for_effort,
+                        inputs=[
+                            effort_input if control is requested_effort else control
+                            for control in control_inputs
+                        ],
+                        outputs=[*control_outputs, requested_effort],
+                    )
                     # A locked slider takes no input, so this holds the free value.
                     temp_input.input(
                         lambda value: value,
@@ -1618,6 +1637,7 @@ def create_demo(playback_status=None):
                 thinking_checkbox,
                 effort_input,
                 requested_temperature,
+                requested_effort,
                 reasoning_control,
             ],
         ).then(

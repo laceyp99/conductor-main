@@ -11,14 +11,14 @@ description: Use when the user asks to check for a new conductor-core version, u
 tag, e.g. in `pyproject.toml`:
 
 ```
-"conductor-core[providers,playback] @ git+https://github.com/laceyp99/conductor-core.git@v0.5.1"
+"conductor-core[providers] @ git+https://github.com/laceyp99/conductor-core.git@v0.12.7"
 ```
 
 The pinned tag is the source of truth for what is currently depended on.
 
 ## Workflow
 
-1. **Read the current pin.** Find the line mentioning `conductor-core` in `pyproject.toml`and note the pinned tag (e.g. `v0.5.1`).
+1. **Read the current pin.** Find the line mentioning `conductor-core` in `pyproject.toml`and note the pinned tag (e.g. `v0.12.7`).
 
 2. **Discover the latest release.** Fetch the latest tag/release of `https://github.com/laceyp99/conductor-core` (use `gh release list` / `gh api repos/laceyp99/conductor-core/tags`, or `git ls-remote --tags`). If the latest tag equals the current pin, report "already up to date" and stop. Do not churn anything.
 

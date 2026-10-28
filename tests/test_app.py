@@ -360,7 +360,7 @@ def test_hidden_effort_inputs_pass_gradio_preprocessing(
                 ["Google", "target-model", True, "high", None, None],
                 state=state,
             )
-        effort = state[sync.inputs[3]._id]
+        effort = state[sync.outputs[3]._id]
         assert effort.visible is False
         assert effort.allow_custom_value is False
         inputs = [
@@ -388,6 +388,57 @@ def test_hidden_effort_inputs_pass_gradio_preprocessing(
         )
 
     asyncio.run(preprocess_controls())
+
+
+def test_rapid_model_switches_ignore_a_stale_effort_dropdown(monkeypatch):
+    effort_model = {
+        "extended_thinking": True,
+        "effort_options": ["low", "high", "max"],
+        "thinking_off": "lowest_effort",
+    }
+    toggle_model = {"extended_thinking": True, "thinking_off": "disabled"}
+    models = {"effort-model": effort_model, "toggle-a": toggle_model}
+    models["toggle-b"] = toggle_model
+    monkeypatch.setattr(app, "get_model_info", lambda: {"models": {"Google": models}})
+    monkeypatch.setattr(app.ollama_api, "get_model_list", lambda request_timeout: [])
+    monkeypatch.setattr(app, "load_history", list)
+    demo = app.create_demo(playback_status=(False, "disabled"))
+    state = SessionState(demo)
+    sync_effort = next(
+        fn for fn in demo.fns.values() if fn.fn is app.sync_controls_for_effort
+    )
+    sync_model = next(
+        fn for fn in demo.fns.values() if fn.fn is app.sync_controls_for_model
+    )
+    effort_dropdown = sync_model.outputs[3]
+
+    async def switch_twice_before_the_browser_catches_up():
+        await demo.process_api(
+            sync_effort,
+            ["Google", "effort-model", True, "max", None, "effort"],
+            state=state,
+        )
+        await demo.process_api(
+            sync_model,
+            ["Google", "toggle-a", True, "max", None, "effort"],
+            state=state,
+        )
+        assert state[effort_dropdown._id].choices == [("low", "low")]
+        # The browser still sends "max" from before the first switch returned.
+        await demo.process_api(
+            sync_model,
+            ["Google", "toggle-b", False, "max", None, "toggle"],
+            state=state,
+        )
+        result = await demo.process_api(
+            sync_model,
+            ["Google", "effort-model", False, "low", None, "toggle"],
+            state=state,
+        )
+        return result["data"][3]
+
+    # The remembered pick returns once a model supports it again.
+    assert asyncio.run(switch_twice_before_the_browser_catches_up())["value"] == "max"
 
 
 def test_model_settings_show_fixed_temperature_only_while_thinking(monkeypatch):
@@ -480,10 +531,12 @@ def test_effort_sync_locks_fixed_temperature_and_keeps_slider_mounted(monkeypatc
     )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
-    _, temperature, thinking, effort, _ = app.sync_controls_for_effort(
-        "Anthropic", "adaptive-model", False, "high", 0.4, "effort"
+    _, temperature, thinking, effort, _, requested_effort = (
+        app.sync_controls_for_effort(
+            "Anthropic", "adaptive-model", False, "high", 0.4, "effort"
+        )
     )
-    _, off_temperature, off_thinking, _, _ = app.sync_controls_for_effort(
+    _, off_temperature, off_thinking, _, _, _ = app.sync_controls_for_effort(
         "Anthropic", "adaptive-model", True, "none", 0.4, "effort"
     )
     _, hidden_temperature, _, _, _ = app.sync_controls_for_model(
@@ -493,6 +546,7 @@ def test_effort_sync_locks_fixed_temperature_and_keeps_slider_mounted(monkeypatc
     assert temperature == {"visible": True, "value": 1.0, "interactive": False}
     assert thinking["value"] is True
     assert effort["value"] == "high"
+    assert requested_effort == "high"
     # Unlocking restores the user's requested temperature, not a default.
     assert off_temperature == {"visible": True, "value": 0.4, "interactive": True}
     assert off_thinking["value"] is False
@@ -1295,6 +1349,7 @@ def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tm
         thinking_update,
         effort_update,
         requested_temperature,
+        requested_effort,
         reasoning_control,
     ) = app.load_history_item("gen_1")
 
@@ -1316,6 +1371,7 @@ def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tm
     assert thinking_update["value"] is True
     assert effort_update["value"] == effort_update["choices"][0]
     assert requested_temperature == 0.6
+    assert requested_effort == effort_update["value"]
     assert reasoning_control == "effort"
 
 
@@ -1344,8 +1400,8 @@ def test_load_history_item_error_paths_preserve_parameter_controls(
     missing_midi = app.load_history_item("missing-midi")
 
     for result in (no_selection, not_found, missing_midi):
-        assert len(result) == 19
-        assert result[-10:] == ({},) * 10
+        assert len(result) == 20
+        assert result[-11:] == ({},) * 11
 
 
 def test_refresh_soundfont_controls_updates_dropdown_choices(monkeypatch):
@@ -1424,12 +1480,17 @@ def test_get_rerender_button_update_requires_active_midi(monkeypatch):
 
 
 def test_history_choices_show_context_in_newest_first_order(monkeypatch):
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
+
+    class FixedOffsetTimestamp(datetime):
+        # Pin the "local" timezone to UTC-5 so the test is host-independent.
+        def astimezone(self, tz=None):
+            return super().astimezone(tz or timezone(timedelta(hours=-5)))
 
     entries = [
         SimpleNamespace(
             id=identifier,
-            timestamp=datetime(2026, 1, day, 12, 0, tzinfo=timezone.utc),
+            timestamp=FixedOffsetTimestamp(2026, 1, day, 12, 0, tzinfo=timezone.utc),
             prompt="similar prompt " + identifier,
             key="C",
             scale="Major",
@@ -1444,7 +1505,7 @@ def test_history_choices_show_context_in_newest_first_order(monkeypatch):
     choices = app.get_history_choices()
 
     assert [value for _, value in choices] == ["new", "old"]
-    assert choices[0][0] == ("C Major · Jan 02, 12:00 PM\nmodel-a\nsimilar prompt new")
+    assert choices[0][0] == "C Major · Jan 02, 07:00 AM\nmodel-a\nsimilar prompt new"
 
 
 def test_history_labels_keep_prompt_on_one_bounded_line(monkeypatch):
@@ -1813,7 +1874,7 @@ def test_history_load_callback_updates_all_parameter_controls_once():
     }
     restored_labels = [
         components_by_id[component_id]["props"].get("label")
-        for component_id in dependency["outputs"][-10:-2]
+        for component_id in dependency["outputs"][-11:-3]
     ]
 
     assert restored_labels == [

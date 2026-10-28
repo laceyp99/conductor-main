@@ -48,10 +48,11 @@ The app discovers packaged and user-available `.sf2` SoundFonts through Core. Co
 
 Audio rendering requires all of the following:
 
-1. The `conductor-core[playback]` dependencies;
-2. FluidSynth installed and available on `PATH`;
-3. FFmpeg installed and available on `PATH`;
-4. An available SoundFont.
+1. FluidSynth installed and available on `PATH`;
+2. FFmpeg with MP3 encoding support installed and available on `PATH`;
+3. An available SoundFont.
+
+Core gives FluidSynth synthesis and FFmpeg encoding 5 seconds each before reporting a rendering error.
 
 Use **Refresh SoundFonts** after adding a SoundFont while the app is running. Select a different SoundFont and click **Re-render Audio** to audition the current MIDI without regenerating it or making another provider call. Playback repeats automatically so the four-bar loop can be auditioned continuously.
 

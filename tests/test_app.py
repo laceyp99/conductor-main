@@ -1199,6 +1199,71 @@ def test_prompt_override_uses_the_app_data_directory(monkeypatch, tmp_path):
     assert app.load_app_prompt_override() == "standalone override"
 
 
+def test_save_prompts_preserves_override_on_partial_write_failure(
+    monkeypatch, tmp_path
+):
+    override_path = tmp_path / "loop gen.txt"
+    override_path.write_text("old prompt", encoding="utf-8")
+    monkeypatch.setattr(app, "PROMPT_OVERRIDE_PATH", override_path)
+    named_temporary_file = app.tempfile.NamedTemporaryFile
+
+    def failing_temporary_file(*args, **kwargs):
+        prompt_file = named_temporary_file(*args, **kwargs)
+        write = prompt_file.write
+
+        def fail_write(text):
+            write(text[:3])
+            raise OSError("partial write failed")
+
+        monkeypatch.setattr(prompt_file, "write", fail_write)
+        return prompt_file
+
+    monkeypatch.setattr(app.tempfile, "NamedTemporaryFile", failing_temporary_file)
+
+    with pytest.raises(OSError, match="partial write failed"):
+        app.save_prompts("new prompt")
+
+    assert override_path.read_text(encoding="utf-8") == "old prompt"
+    assert list(tmp_path.iterdir()) == [override_path]
+
+
+def test_save_prompts_preserves_override_on_replace_failure(monkeypatch, tmp_path):
+    override_path = tmp_path / "loop gen.txt"
+    override_path.write_text("old prompt", encoding="utf-8")
+    monkeypatch.setattr(app, "PROMPT_OVERRIDE_PATH", override_path)
+
+    def fail_replace(source, destination):
+        assert Path(source).read_text(encoding="utf-8") == "new prompt"
+        raise OSError("replacement failed")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="replacement failed"):
+        app.save_prompts("new prompt")
+
+    assert override_path.read_text(encoding="utf-8") == "old prompt"
+    assert list(tmp_path.iterdir()) == [override_path]
+
+
+def test_save_prompts_promotes_closed_complete_file(monkeypatch, tmp_path):
+    override_path = tmp_path / "loop gen.txt"
+    override_path.write_text("old prompt", encoding="utf-8")
+    monkeypatch.setattr(app, "PROMPT_OVERRIDE_PATH", override_path)
+    replace = Path.replace
+
+    def check_replace(source, destination):
+        assert Path(source).parent == override_path.parent
+        assert app.load_app_prompt_override() == "old prompt"
+        assert Path(source).read_text(encoding="utf-8") == "new prompt ♫"
+        replace(source, destination)
+
+    monkeypatch.setattr(Path, "replace", check_replace)
+
+    assert app.save_prompts("new prompt ♫").startswith("Prompts saved successfully")
+    assert app.load_app_prompt_override() == "new prompt ♫"
+    assert list(tmp_path.iterdir()) == [override_path]
+
+
 def test_rerender_current_audio_skips_existing_matching_soundfont(
     monkeypatch, tmp_path
 ):

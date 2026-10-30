@@ -357,7 +357,7 @@ def test_hidden_effort_inputs_pass_gradio_preprocessing(
         if switch_model:
             await demo.process_api(
                 sync,
-                ["Google", "target-model", True, "high", None, None],
+                ["Google", "target-model", True, "high", None, None, None],
                 state=state,
             )
         effort = state[sync.outputs[3]._id]
@@ -383,7 +383,7 @@ def test_hidden_effort_inputs_pass_gradio_preprocessing(
         # The same hidden input must also allow subsequent model-control events.
         await demo.process_api(
             sync,
-            ["Google", "target-model", False, effort.value, None, None],
+            ["Google", "target-model", False, effort.value, None, None, None],
             state=state,
         )
 
@@ -415,24 +415,24 @@ def test_rapid_model_switches_ignore_a_stale_effort_dropdown(monkeypatch):
     async def switch_twice_before_the_browser_catches_up():
         await demo.process_api(
             sync_effort,
-            ["Google", "effort-model", True, "max", None, "effort"],
+            ["Google", "effort-model", True, "max", None, "effort", None],
             state=state,
         )
         await demo.process_api(
             sync_model,
-            ["Google", "toggle-a", True, "max", None, "effort"],
+            ["Google", "toggle-a", True, "max", None, "effort", None],
             state=state,
         )
         assert state[effort_dropdown._id].choices == [("low", "low")]
         # The browser still sends "max" from before the first switch returned.
         await demo.process_api(
             sync_model,
-            ["Google", "toggle-b", False, "max", None, "toggle"],
+            ["Google", "toggle-b", False, "max", None, "toggle", None],
             state=state,
         )
         result = await demo.process_api(
             sync_model,
-            ["Google", "effort-model", False, "low", None, "toggle"],
+            ["Google", "effort-model", False, "low", None, "toggle", None],
             state=state,
         )
         return result["data"][3]
@@ -531,15 +531,15 @@ def test_effort_sync_locks_fixed_temperature_and_keeps_slider_mounted(monkeypatc
     )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
-    _, temperature, thinking, effort, _, requested_effort = (
+    _, temperature, thinking, effort, _, _, requested_effort = (
         app.sync_controls_for_effort(
             "Anthropic", "adaptive-model", False, "high", 0.4, "effort"
         )
     )
-    _, off_temperature, off_thinking, _, _, _ = app.sync_controls_for_effort(
+    _, off_temperature, off_thinking, _, _, _, _ = app.sync_controls_for_effort(
         "Anthropic", "adaptive-model", True, "none", 0.4, "effort"
     )
-    _, hidden_temperature, _, _, _ = app.sync_controls_for_model(
+    _, hidden_temperature, _, _, _, _ = app.sync_controls_for_model(
         "Anthropic", "no-temperature-model", False, "none", 0.4, "effort"
     )
 
@@ -584,17 +584,17 @@ def test_model_switch_keeps_temperature_effort_and_toggle_choices(monkeypatch):
     )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
-    _, temperature, _, effort, control = app.sync_controls_for_model(
+    _, temperature, _, effort, control, _ = app.sync_controls_for_model(
         "Google", "effort-b", True, "high", 0.6, "effort"
     )
-    _, _, _, missing_effort, _ = app.sync_controls_for_model(
+    _, _, _, missing_effort, _, _ = app.sync_controls_for_model(
         "Google", "effort-b", True, "medium", 0.6, "effort"
     )
-    _, _, toggle_kept, _, _ = app.sync_controls_for_model(
+    _, _, toggle_kept, _, _, _ = app.sync_controls_for_model(
         "Google", "toggle-b", True, "low", 0.6, "toggle"
     )
     # An effort model's hidden checkbox is True; it must not switch reasoning on.
-    _, _, toggle_from_effort, _, _ = app.sync_controls_for_model(
+    _, _, toggle_from_effort, _, _, _ = app.sync_controls_for_model(
         "Google", "toggle-a", True, "high", 0.6, "effort"
     )
 
@@ -688,6 +688,119 @@ def test_model_settings_show_no_reasoning_for_uninspectable_ollama_model(
     assert warnings == [
         "Ollama model inspection failed; reasoning controls are unavailable."
     ]
+
+
+@pytest.mark.parametrize("effort_options", [None, ["low", "high"]])
+def test_wired_reasoning_changes_reuse_session_snapshot(monkeypatch, effort_options):
+    calls = []
+    models = ["local-model"]
+
+    def discover(request_timeout):
+        assert request_timeout == 3.0
+        calls.append("list")
+        return list(models)
+
+    def inspect(model, request_timeout):
+        assert request_timeout == 3.0
+        calls.append(model)
+        return app.ollama_api.OllamaModelInspection(
+            model,
+            {
+                "extended_thinking": True,
+                "thinking_off": "disabled",
+                "effort_options": effort_options,
+                "thinking_fixed_temperature": 1.0,
+            },
+            None,
+        )
+
+    monkeypatch.setattr(app.ollama_api, "get_model_list", discover)
+    monkeypatch.setattr(app.ollama_api, "get_model_status", inspect)
+    monkeypatch.setattr(app, "load_history", list)
+    demo = app.create_demo(playback_status=(False, "disabled"))
+    sessions = [SessionState(demo), SessionState(demo)]
+    callbacks = {fn.fn: fn for fn in demo.fns.values()}
+    calls.clear()
+
+    async def change_controls():
+        provider = callbacks[app.sync_controls_for_provider]
+        for state in sessions:
+            await demo.process_api(
+                provider, ["Ollama", False, None, None, None, None], state=state
+            )
+        assert calls == ["list", "local-model"] * 2
+        assert (
+            sessions[0][provider.outputs[5]._id]
+            is not sessions[1][provider.outputs[5]._id]
+        )
+        state = sessions[0]
+        callback = callbacks[
+            app.sync_controls_for_effort
+            if effort_options
+            else app.sync_controls_for_thinking
+        ]
+        result = await demo.process_api(
+            callback,
+            ["Ollama", "local-model", True, "high", None, None, None],
+            state=state,
+        )
+        assert result["data"][0] == {"__type__": "update"}
+        assert result["data"][1]["value"] == 1.0
+        assert calls == ["list", "local-model"] * 2
+        # Selecting a model refreshes even when its name has not changed.
+        models.append("new-model")
+        refreshed = await demo.process_api(
+            callbacks[app.sync_controls_for_model],
+            ["Ollama", "local-model", True, None, None, None, None],
+            state=state,
+        )
+        assert calls == ["list", "local-model"] * 3
+        assert [choice[1] for choice in refreshed["data"][0]["choices"]] == models
+
+    asyncio.run(change_controls())
+
+
+@pytest.mark.parametrize("failure", ["list", "inspect"])
+def test_failed_snapshot_is_reused_until_selection_refresh(monkeypatch, failure):
+    calls = []
+    failed = True
+    warnings = []
+
+    def discover(request_timeout):
+        assert request_timeout == 3.0
+        calls.append("list")
+        if failed and failure == "list":
+            raise ProviderConnectionError("Ollama", "offline")
+        return ["local-model"]
+
+    def inspect(model, request_timeout):
+        assert request_timeout == 3.0
+        calls.append("inspect")
+        if failed:
+            raise ProviderConnectionError("Ollama", "offline")
+        return app.ollama_api.OllamaModelInspection(
+            model, {"extended_thinking": True, "thinking_off": "disabled"}, None
+        )
+
+    monkeypatch.setattr(app.ollama_api, "get_model_list", discover)
+    monkeypatch.setattr(app.ollama_api, "get_model_status", inspect)
+    monkeypatch.setattr(app.gr, "Warning", warnings.append)
+    initial = app.sync_controls_for_model("Ollama", "local-model")
+    snapshot = initial[5]
+    expected = ["list"] if failure == "list" else ["list", "inspect"]
+    assert calls == expected
+    assert snapshot["config"] == {}
+    failed = False
+    app.sync_controls_for_thinking(
+        "Ollama", snapshot["model"], True, "low", 0.4, None, snapshot
+    )
+    assert calls == expected
+    assert len(warnings) == 1
+    refreshed = app.sync_controls_for_model(
+        "Ollama", "local-model", True, "low", 0.4, None, snapshot
+    )
+    assert calls == [*expected, "list", "inspect"]
+    assert refreshed[5]["config"]["extended_thinking"] is True
 
 
 def test_get_providers_does_not_inspect_every_ollama_model(monkeypatch):
@@ -1069,25 +1182,37 @@ def test_cloud_history_keeps_available_providers(monkeypatch, ollama_available):
 def test_history_controls_restore_installed_ollama_without_false_unavailable(
     monkeypatch,
 ):
-    monkeypatch.setattr(
-        app, "get_model_info", lambda: {"models": {"OpenAI": {"current-model": {}}}}
-    )
-    monkeypatch.setattr(
-        app.ollama_api,
-        "get_model_list",
-        lambda request_timeout: ["gemma4:e4b", "other:latest"],
-    )
-    monkeypatch.setattr(
-        app.ollama_api,
-        "get_model_status",
-        lambda model, request_timeout: app.ollama_api.OllamaModelInspection(
+    calls = []
+
+    def discover(request_timeout):
+        assert request_timeout == 3.0
+        calls.append("list")
+        return ["gemma4:e4b", "other:latest"]
+
+    def inspect(model, request_timeout):
+        assert request_timeout == 3.0
+        calls.append(model)
+        return app.ollama_api.OllamaModelInspection(
             model,
             {
                 "extended_thinking": True,
                 "effort_options": ["low", "medium", "high"],
             },
             None,
-        ),
+        )
+
+    monkeypatch.setattr(
+        app, "get_model_info", lambda: {"models": {"OpenAI": {"current-model": {}}}}
+    )
+    monkeypatch.setattr(
+        app.ollama_api,
+        "get_model_list",
+        discover,
+    )
+    monkeypatch.setattr(
+        app.ollama_api,
+        "get_model_status",
+        inspect,
     )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
@@ -1117,6 +1242,11 @@ def test_history_controls_restore_installed_ollama_without_false_unavailable(
         "visible": True,
     }
     assert updates.warnings == ()
+    assert calls == ["list", "gemma4:e4b"]
+    app.sync_controls_for_effort(
+        "Ollama", "gemma4:e4b", True, "high", 0.5, "effort", updates.model_snapshot
+    )
+    assert calls == ["list", "gemma4:e4b"]
 
 
 def test_history_controls_mark_missing_ollama_model_only(monkeypatch):
@@ -1351,6 +1481,7 @@ def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tm
         requested_temperature,
         requested_effort,
         reasoning_control,
+        _model_snapshot,
     ) = app.load_history_item("gen_1")
 
     assert loaded_midi_path == str(midi_path)
@@ -1400,8 +1531,8 @@ def test_load_history_item_error_paths_preserve_parameter_controls(
     missing_midi = app.load_history_item("missing-midi")
 
     for result in (no_selection, not_found, missing_midi):
-        assert len(result) == 20
-        assert result[-11:] == ({},) * 11
+        assert len(result) == 21
+        assert result[-12:] == ({},) * 12
 
 
 def test_refresh_soundfont_controls_updates_dropdown_choices(monkeypatch):
@@ -1874,7 +2005,7 @@ def test_history_load_callback_updates_all_parameter_controls_once():
     }
     restored_labels = [
         components_by_id[component_id]["props"].get("label")
-        for component_id in dependency["outputs"][-11:-3]
+        for component_id in dependency["outputs"][-12:-4]
     ]
 
     assert restored_labels == [

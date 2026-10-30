@@ -234,14 +234,6 @@ def format_model_label(provider, model_name):
     return f"{model_name} ({input_price} in / {output_price} out per 1M tokens)"
 
 
-def get_model_dropdown_choices(provider):
-    """Get dropdown choices as (label, value) tuples for a provider."""
-    models = get_models_for_provider(provider)
-    return [
-        (format_model_label(provider, model_name), model_name) for model_name in models
-    ]
-
-
 @dataclass(frozen=True)
 class HistoryControlUpdates:
     """Coherent form updates derived from one saved generation."""
@@ -257,6 +249,7 @@ class HistoryControlUpdates:
     requested_temperature: object
     requested_effort: object
     reasoning_control: object
+    model_snapshot: object
     warnings: tuple[str, ...]
 
     def as_tuple(self):
@@ -273,6 +266,7 @@ class HistoryControlUpdates:
             self.requested_temperature,
             self.requested_effort,
             self.reasoning_control,
+            self.model_snapshot,
         )
 
 
@@ -327,6 +321,12 @@ def get_history_control_updates(gen):
     saved_thinking = getattr(gen, "use_thinking", None)
     saved_effort = getattr(gen, "effort", None)
     reasoning_was_recorded = saved_thinking is not None and saved_effort is not None
+    snapshot = {
+        "provider": provider,
+        "model": model,
+        "choices": model_choices,
+        "config": get_model_config(provider, model) if model_is_available else {},
+    }
 
     if model_is_available:
         # A saved use_thinking=False on an effort model selects its off level.
@@ -335,6 +335,7 @@ def get_history_control_updates(gen):
             model,
             bool(saved_thinking),
             saved_effort if saved_thinking else None,
+            snapshot=snapshot,
         )
     else:
         settings = {
@@ -392,6 +393,7 @@ def get_history_control_updates(gen):
         else gr.update(),
         requested_effort=effort_value,
         reasoning_control=settings["reasoning_control"],
+        model_snapshot=snapshot,
         warnings=tuple(warnings),
     )
 
@@ -434,14 +436,6 @@ def get_models_for_provider(provider):
     if provider in model_info["models"]:
         return list(model_info["models"][provider].keys())
     return []
-
-
-def get_selected_model(provider, model_choice):
-    """Normalize the selected model for a provider."""
-    models = get_models_for_provider(provider)
-    if model_choice in models:
-        return model_choice
-    return models[0] if models else None
 
 
 def get_model_config(provider, model):
@@ -509,14 +503,17 @@ def get_model_settings(
     use_thinking=False,
     effort=None,
     requested_temperature=None,
+    snapshot=None,
 ):
     """Resolve the provider/model UI settings for dependent controls.
 
     The requested effort and temperature carry over when the selected model
     supports them; a fixed thinking temperature only overrides what is shown.
     """
-    selected_model = get_selected_model(provider, model_choice)
-    model_config = get_model_config(provider, selected_model) if selected_model else {}
+    if snapshot is None:
+        snapshot = get_model_snapshot(provider, model_choice)
+    selected_model = snapshot["model"]
+    model_config = snapshot["config"]
     reasoning_control = get_reasoning_control(model_config)
     effort_options = get_effort_choices(model_config)
     if effort in effort_options:
@@ -557,6 +554,18 @@ def get_model_settings(
     }
 
 
+def get_model_snapshot(provider, model_choice):
+    """Discover a catalog and inspect its selected model once for this session."""
+    models = get_models_for_provider(provider)
+    model = model_choice if model_choice in models else next(iter(models), None)
+    return {
+        "provider": provider,
+        "model": model,
+        "choices": [(format_model_label(provider, name), name) for name in models],
+        "config": get_model_config(provider, model) if model else {},
+    }
+
+
 def sync_model_capabilities(
     provider,
     model_choice,
@@ -564,23 +573,36 @@ def sync_model_capabilities(
     effort=None,
     requested_temperature=None,
     previous_control=None,
+    snapshot=None,
+    *,
+    refresh=True,
 ):
     """Synchronize model selection and dependent controls from one explicit code path.
 
     The toggle state carries over only between toggle models; the hidden
     checkbox of other controls does not hold a user choice.
     """
-    choices = get_model_dropdown_choices(provider)
+    refresh = (
+        refresh
+        or snapshot is None
+        or snapshot["provider"] != provider
+        or snapshot["model"] != model_choice
+    )
+    if refresh:
+        snapshot = get_model_snapshot(provider, model_choice)
     settings = get_model_settings(
         provider,
         model_choice,
         bool(use_thinking) and previous_control == "toggle",
         effort,
         requested_temperature,
+        snapshot,
     )
 
     return (
-        gr.update(choices=choices, value=settings["selected_model"]),
+        gr.update(choices=snapshot["choices"], value=settings["selected_model"])
+        if refresh
+        else gr.update(),
         gr.update(
             visible=get_temperature_visibility(settings["show_temperature"]),
             value=settings["temperature_value"],
@@ -597,6 +619,7 @@ def sync_model_capabilities(
             visible=settings["show_effort"],
         ),
         settings["reasoning_control"],
+        snapshot,
     )
 
 
@@ -616,7 +639,7 @@ def sync_controls_for_model(*control_values):
 
 def sync_controls_for_thinking(*control_values):
     """Refresh dependent controls when the reasoning toggle changes."""
-    return sync_model_capabilities(*control_values)
+    return sync_model_capabilities(*control_values, refresh=False)
 
 
 def sync_controls_for_effort(*control_values):
@@ -624,7 +647,10 @@ def sync_controls_for_effort(*control_values):
 
     Also returns the picked effort, which later model events carry over.
     """
-    return (*sync_model_capabilities(*control_values), control_values[3])
+    return (
+        *sync_model_capabilities(*control_values, refresh=False),
+        control_values[3],
+    )
 
 
 def sync_context_size_for_provider(provider):
@@ -1085,9 +1111,9 @@ def load_history_item(gen_id):
                generation_id, saved_soundfont, current_audio_path, rerender_update,
                key_update, scale_update, description_update, provider_update, model_update,
                temperature_update, thinking_update, effort_update,
-               requested_temperature, requested_effort, reasoning_control)
+               requested_temperature, requested_effort, reasoning_control, model_snapshot)
     """
-    unchanged_controls = tuple(gr.update() for _ in range(11))
+    unchanged_controls = tuple(gr.update() for _ in range(12))
     if not gen_id:
         return (
             None,
@@ -1301,8 +1327,11 @@ def create_demo(playback_status=None):
                             default_provider = DEFAULT_PROVIDER
                             # No model choice selects the provider's first model,
                             # which is its newest in Core's registry.
+                            default_snapshot = get_model_snapshot(
+                                default_provider, None
+                            )
                             default_settings = get_model_settings(
-                                default_provider, None, False
+                                default_provider, None, False, snapshot=default_snapshot
                             )
                             # The user's last free temperature, kept while a
                             # model shows a fixed one, and the active control.
@@ -1316,13 +1345,14 @@ def create_demo(playback_status=None):
                             reasoning_control = gr.State(
                                 default_settings["reasoning_control"]
                             )
+                            model_snapshot = gr.State(default_snapshot)
                             provider_input = gr.Dropdown(
                                 choices=get_providers(),
                                 label="Provider",
                                 value=default_provider,
                             )
                             model_choice_input = gr.Dropdown(
-                                choices=get_model_dropdown_choices(default_provider),
+                                choices=default_snapshot["choices"],
                                 label="Model",
                                 value=default_settings["selected_model"],
                             )
@@ -1401,8 +1431,8 @@ def create_demo(playback_status=None):
                     )
                     error_message = gr.Textbox(label="Status", interactive=False)
 
-                    # Every model control refreshes the dependent controls from
-                    # the current choices, so they carry over where supported.
+                    # Selection events refresh discovery; reasoning edits reuse
+                    # this session's capabilities and preserve supported choices.
                     control_inputs = [
                         provider_input,
                         model_choice_input,
@@ -1410,6 +1440,7 @@ def create_demo(playback_status=None):
                         requested_effort,
                         requested_temperature,
                         reasoning_control,
+                        model_snapshot,
                     ]
                     control_outputs = [
                         model_choice_input,
@@ -1417,6 +1448,7 @@ def create_demo(playback_status=None):
                         thinking_checkbox,
                         effort_input,
                         reasoning_control,
+                        model_snapshot,
                     ]
                     provider_input.input(
                         sync_controls_for_provider,
@@ -1639,6 +1671,7 @@ def create_demo(playback_status=None):
                 requested_temperature,
                 requested_effort,
                 reasoning_control,
+                model_snapshot,
             ],
         ).then(
             loaded_history_status,

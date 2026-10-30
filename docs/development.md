@@ -27,6 +27,10 @@ The package entry point is `conductor_main.app:main`. UI-specific visualization 
   failure leaves cloud providers available; selecting or restoring Ollama reports
   a warning. A model inspection failure hides reasoning controls and reports a
   warning. Core rejects generation if the selected model cannot be inspected.
+- Provider and model selections refresh the catalog and selected model metadata.
+  Reasoning toggle and effort changes reuse that session's snapshot without
+  contacting Ollama. After a discovery or inspection failure, select the provider
+  or model again to retry.
 
 ### An Ollama model ran out of context
 

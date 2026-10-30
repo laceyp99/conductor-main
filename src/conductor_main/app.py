@@ -10,6 +10,7 @@ Features:
 
 import logging
 import os
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -834,8 +835,20 @@ def save_prompts(loop_gen_text):
         str: A message indicating the status of the save operation.
     """
     PROMPT_OVERRIDE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with PROMPT_OVERRIDE_PATH.open("w", encoding="utf-8") as f:
-        f.write(loop_gen_text)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=PROMPT_OVERRIDE_PATH.parent,
+            delete=False,
+        ) as prompt_file:
+            temporary_path = Path(prompt_file.name)
+            prompt_file.write(loop_gen_text)
+        temporary_path.replace(PROMPT_OVERRIDE_PATH)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
     return (
         "Prompts saved successfully at "
         + datetime.now(timezone.utc).astimezone().strftime("%I:%M:%S %p on %B %d, %Y")

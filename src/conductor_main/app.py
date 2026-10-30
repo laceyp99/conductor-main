@@ -1336,7 +1336,7 @@ def create_demo(playback_status=None):
                                 label="Description", value="A rhythmic sad pop song"
                             )
                         with gr.Column():
-                            gr.Markdown("## Generation Parameters")
+                            generation_heading = gr.Markdown("## Generation Parameters")
                             default_provider = DEFAULT_PROVIDER
                             # No model choice selects the provider's first model,
                             # which is its newest in Core's registry.
@@ -1471,16 +1471,22 @@ def create_demo(playback_status=None):
                             if control is not model_choice_input
                         ],
                         outputs=control_outputs,
+                        show_progress="minimal",
+                        show_progress_on=generation_heading,
                     )
-                    for control, sync_controls in (
-                        (model_choice_input, sync_controls_for_model),
-                        (thinking_checkbox, sync_controls_for_thinking),
-                    ):
-                        control.input(
-                            sync_controls,
-                            inputs=control_inputs,
-                            outputs=control_outputs,
-                        )
+                    model_choice_input.input(
+                        sync_controls_for_model,
+                        inputs=control_inputs,
+                        outputs=control_outputs,
+                        show_progress="minimal",
+                        show_progress_on=generation_heading,
+                    )
+                    thinking_checkbox.input(
+                        sync_controls_for_thinking,
+                        inputs=control_inputs,
+                        outputs=control_outputs,
+                        show_progress="hidden",
+                    )
                     effort_input.input(
                         sync_controls_for_effort,
                         inputs=[
@@ -1488,18 +1494,21 @@ def create_demo(playback_status=None):
                             for control in control_inputs
                         ],
                         outputs=[*control_outputs, requested_effort],
+                        show_progress="hidden",
                     )
                     # A locked slider takes no input, so this holds the free value.
                     temp_input.input(
                         lambda value: value,
                         inputs=temp_input,
                         outputs=requested_temperature,
+                        show_progress="hidden",
                     )
                     # .change also covers provider updates from loading history.
                     provider_input.change(
                         sync_context_size_for_provider,
                         inputs=provider_input,
                         outputs=advanced_settings,
+                        show_progress="hidden",
                     )
                     # When the user clicks the button, run the loop generation function based on the current inputs.
                     # Capture the event so the stop-waiting button can detach the UI from the in-flight request.
@@ -1614,7 +1623,7 @@ def create_demo(playback_status=None):
                 visible=False,
                 elem_classes=["history-sidebar"],
             ) as history_sidebar:
-                gr.Markdown("## History")
+                history_heading = gr.Markdown("## History")
 
                 with gr.Row() as history_actions:
                     load_btn = gr.Button("Load", size="sm", variant="primary")
@@ -1646,6 +1655,7 @@ def create_demo(playback_status=None):
                 delete_confirmation,
                 history_status,
             ],
+            show_progress="hidden",
         )
         history_toggle_event.then(fn=None, js=PIANO_ROLL_RESIZE_JS, queue=False)
 
@@ -1654,9 +1664,11 @@ def create_demo(playback_status=None):
             select_history_item,
             inputs=[history_list],
             outputs=[history_status],
+            show_progress="hidden",
         ).then(
             hide_delete_confirmation,
             outputs=[history_actions, delete_confirmation],
+            show_progress="hidden",
         )
 
         # Load history item into main view
@@ -1686,20 +1698,25 @@ def create_demo(playback_status=None):
                 reasoning_control,
                 model_snapshot,
             ],
+            show_progress="minimal",
+            show_progress_on=history_heading,
         ).then(
             loaded_history_status,
             inputs=[current_generation_id],
             outputs=[history_status],
+            show_progress="hidden",
         )
 
         delete_btn.click(
             show_delete_confirmation,
             inputs=[history_list],
             outputs=[history_actions, delete_confirmation, history_status],
+            show_progress="hidden",
         )
         cancel_delete_btn.click(
             cancel_delete_confirmation,
             outputs=[history_actions, delete_confirmation, history_status],
+            show_progress="hidden",
         )
         confirm_delete_btn.click(
             delete_history_item,
@@ -1730,6 +1747,8 @@ def create_demo(playback_status=None):
             refresh_history,
             inputs=[history_list],
             outputs=[history_list],
+            show_progress="minimal",
+            show_progress_on=history_heading,
         )
 
         gen_event.then(

@@ -31,6 +31,8 @@ The package entry point is `conductor_main.app:main`. UI-specific visualization 
   Reasoning toggle and effort changes reuse that session's snapshot without
   contacting Ollama. After a discovery or inspection failure, select the provider
   or model again to retry.
+  Reasoning edits also preserve an unavailable model restored from history;
+  select an installed model to refresh its controls.
 
 ### An Ollama model ran out of context
 

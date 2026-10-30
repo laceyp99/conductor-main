@@ -760,6 +760,56 @@ def test_wired_reasoning_changes_reuse_session_snapshot(monkeypatch, effort_opti
     asyncio.run(change_controls())
 
 
+@pytest.mark.parametrize(
+    ("snapshot_provider", "snapshot_model"),
+    [("Ollama", "old-model"), ("Google", "local-model")],
+    ids=["model-mismatch", "provider-mismatch"],
+)
+def test_reasoning_change_refreshes_mismatched_snapshot(
+    monkeypatch, snapshot_provider, snapshot_model
+):
+    calls = []
+
+    def discover(request_timeout):
+        assert request_timeout == 3.0
+        calls.append("list")
+        return ["local-model"]
+
+    config = {
+        "extended_thinking": True,
+        "thinking_off": "disabled",
+        "thinking_fixed_temperature": 1.0,
+    }
+
+    def inspect(model, request_timeout):
+        assert request_timeout == 3.0
+        calls.append(model)
+        return app.ollama_api.OllamaModelInspection(model, config, None)
+
+    monkeypatch.setattr(app.ollama_api, "get_model_list", discover)
+    monkeypatch.setattr(app.ollama_api, "get_model_status", inspect)
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+    stale_snapshot = {
+        "provider": snapshot_provider,
+        "model": snapshot_model,
+        "choices": [(snapshot_model, snapshot_model)],
+        "config": {},
+    }
+
+    model, temperature, thinking, _, _, snapshot = app.sync_controls_for_thinking(
+        "Ollama", "local-model", True, "low", 0.4, "toggle", stale_snapshot
+    )
+
+    assert calls == ["list", "local-model"]
+    assert model["value"] == "local-model"
+    assert model["choices"] == [("local-model", "local-model")]
+    assert snapshot["provider"] == "Ollama"
+    assert snapshot["model"] == "local-model"
+    assert snapshot["config"] == config
+    assert temperature["value"] == 1.0
+    assert thinking == {"visible": True, "value": True}
+
+
 @pytest.mark.parametrize("failure", ["list", "inspect"])
 def test_failed_snapshot_is_reused_until_selection_refresh(monkeypatch, failure):
     calls = []
@@ -1250,13 +1300,19 @@ def test_history_controls_restore_installed_ollama_without_false_unavailable(
 
 
 def test_history_controls_mark_missing_ollama_model_only(monkeypatch):
+    calls = []
+
+    def discover(request_timeout):
+        calls.append("list")
+        return ["other:latest"]
+
     monkeypatch.setattr(
         app, "get_model_info", lambda: {"models": {"OpenAI": {"current-model": {}}}}
     )
     monkeypatch.setattr(
         app.ollama_api,
         "get_model_list",
-        lambda request_timeout: ["other:latest"],
+        discover,
     )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
@@ -1279,6 +1335,14 @@ def test_history_controls_mark_missing_ollama_model_only(monkeypatch):
         "missing:latest",
     )
     assert updates.warnings == ("Unavailable selection: Ollama / missing:latest.",)
+    model, _, thinking, effort, _, snapshot = app.sync_controls_for_thinking(
+        "Ollama", "missing:latest", True, "low", 0.5, None, updates.model_snapshot
+    )
+    assert calls == ["list"]
+    assert model == {}
+    assert snapshot["model"] == "missing:latest"
+    assert thinking["visible"] is False
+    assert effort["visible"] is False
 
 
 def test_history_controls_preserve_ollama_when_service_unreachable(monkeypatch):

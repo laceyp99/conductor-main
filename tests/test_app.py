@@ -10,6 +10,8 @@ from gradio.state_holder import SessionState
 
 from conductor_main import app
 
+PRODUCTION_HISTORY_STORE = app.HISTORY_STORE
+
 
 @pytest.fixture(autouse=True)
 def isolated_app_data(monkeypatch, tmp_path):
@@ -1404,7 +1406,7 @@ def test_history_controls_preserve_ollama_when_service_unreachable(monkeypatch):
 
 
 def test_history_store_uses_the_app_retention_policy():
-    assert app.HISTORY_STORE.max_generations == app.MAX_HISTORY_GENERATIONS
+    assert PRODUCTION_HISTORY_STORE.max_generations == app.MAX_HISTORY_GENERATIONS
 
 
 def test_prompt_override_uses_the_app_data_directory(monkeypatch, tmp_path):

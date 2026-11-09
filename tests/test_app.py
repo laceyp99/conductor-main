@@ -10,6 +10,34 @@ from gradio.state_holder import SessionState
 
 from conductor_main import app
 
+PRODUCTION_HISTORY_STORE = app.HISTORY_STORE
+
+
+@pytest.fixture(autouse=True)
+def isolated_app_data(monkeypatch, tmp_path):
+    """Keep UI callbacks away from personal history and saved prompts."""
+    data_dir = tmp_path / "app-data"
+    monkeypatch.setattr(app, "APP_DATA_DIR", data_dir)
+    monkeypatch.setattr(
+        app, "PROMPT_OVERRIDE_PATH", data_dir / "Prompts" / "loop gen.txt"
+    )
+    monkeypatch.setattr(
+        app,
+        "HISTORY_STORE",
+        app.FilesystemArtifactStore(
+            data_dir / "generations", max_generations=app.MAX_HISTORY_GENERATIONS
+        ),
+    )
+
+
+@pytest.fixture(autouse=True)
+def isolated_ollama(monkeypatch):
+    """Default to no local models; discovery tests override these fakes."""
+    monkeypatch.setattr(app.ollama_api, "get_model_list", lambda request_timeout: [])
+    monkeypatch.setattr(
+        app.ollama_api, "get_model_status", lambda model, request_timeout: None
+    )
+
 
 def _write_binary_file(path: Path, content: bytes = b"data") -> Path:
     path.write_bytes(content)
@@ -1378,7 +1406,7 @@ def test_history_controls_preserve_ollama_when_service_unreachable(monkeypatch):
 
 
 def test_history_store_uses_the_app_retention_policy():
-    assert app.HISTORY_STORE.max_generations == app.MAX_HISTORY_GENERATIONS
+    assert PRODUCTION_HISTORY_STORE.max_generations == app.MAX_HISTORY_GENERATIONS
 
 
 def test_prompt_override_uses_the_app_data_directory(monkeypatch, tmp_path):

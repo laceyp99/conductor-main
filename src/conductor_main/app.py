@@ -41,7 +41,7 @@ from conductor_core.providers import ollama as ollama_api
 from conductor_core.storage import FilesystemArtifactStore
 from mido import MidiFile
 
-from conductor_main.visualization import visualize_midi_plotly
+from conductor_main.visualization import PIANO_ROLL_HOVER_JS, visualize_midi_plotly
 
 DEFAULT_PROVIDER = "Google"
 DEFAULT_TEMPERATURE = 0.1
@@ -1747,6 +1747,8 @@ def create_demo(playback_status=None):
             refresh_history,
             outputs=[history_list],
         )
+
+        demo.load(fn=None, js=PIANO_ROLL_HOVER_JS)
 
     return demo
 

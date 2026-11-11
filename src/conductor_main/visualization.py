@@ -126,24 +126,13 @@ def visualize_midi_plotly(input_midi):
             yanchor="bottom",
         )
 
-    hover_x, hover_y, hover_text = [], [], []
+    colors, hover_text = [], []
     for pitch, start, end, velocity in sixteenth_notes:
-        figure.add_shape(
-            type="rect",
-            x0=start,
-            x1=end,
-            y0=pitch - 0.4,
-            y1=pitch + 0.4,
-            fillcolor=_velocity_color(velocity),
-            line={"color": "rgba(255,255,255,0.3)", "width": 1},
-            layer="above",
-        )
+        colors.append(_velocity_color(velocity))
         bar = int(start // 16) + 1
         beat = int((start % 16) // 4) + 1
         subdivision = int(start % 4) + 1
         name, octave = _note_label(pitch)
-        hover_x.append((start + end) / 2)
-        hover_y.append(pitch)
         hover_text.append(
             f"Note: {name}{octave}<br>Velocity: {velocity}<br>"
             f"Position: Bar {bar}, Beat {beat}.{subdivision}<br>"
@@ -151,13 +140,18 @@ def visualize_midi_plotly(input_midi):
         )
 
     figure.add_trace(
-        go.Scatter(
-            x=hover_x,
-            y=hover_y,
-            mode="markers",
-            marker={"size": 10, "opacity": 0},
-            hoverinfo="text",
+        go.Bar(
+            orientation="h",
+            base=[start for _, start, _, _ in sixteenth_notes],
+            x=[end - start for _, start, end, _ in sixteenth_notes],
+            y=pitches,
+            width=0.8,
+            marker={
+                "color": colors,
+                "line": {"color": "rgba(255,255,255,0.3)", "width": 1},
+            },
             hovertext=hover_text,
+            hovertemplate="%{hovertext}<extra></extra>",
             hoverlabel={"bgcolor": GRID, "font_size": 12, "font_color": TEXT},
         )
     )
@@ -185,6 +179,7 @@ def visualize_midi_plotly(input_midi):
             "tickfont": {"color": TEXT, "size": 10},
         },
         showlegend=False,
+        barmode="overlay",
         margin={"l": 60, "r": 20, "t": 40, "b": 40},
         height=400,
         hoverdistance=20,
@@ -192,3 +187,83 @@ def visualize_midi_plotly(input_midi):
         modebar={"bgcolor": "rgba(0,0,0,0)", "color": TEXT, "activecolor": "#FF6B5B"},
     )
     return figure
+
+
+# Install once on the Gradio plot. Plotly still handles full-bar hit testing;
+# this overlay places the existing text without its automatic side switching.
+PIANO_ROLL_HOVER_JS = """
+() => {
+    const root = document.querySelector("#piano-roll");
+    if (!root || root.dataset.noteHoverInstalled) return;
+    root.dataset.noteHoverInstalled = "true";
+    root.style.position = "relative";
+    const style = document.createElement("style");
+    style.textContent = "#piano-roll .hoverlayer { visibility: hidden; }";
+    root.append(style);
+    const tip = document.createElement("div");
+    tip.className = "note-hover-tooltip";
+    tip.setAttribute("role", "tooltip");
+    tip.style.cssText = "position:absolute;display:none;pointer-events:none;" +
+        "z-index:20;white-space:pre-line;padding:4px 6px;border:1px solid;" +
+        "font:12px Arial,sans-serif;line-height:1.3;max-width:calc(100% - 16px)";
+    root.append(tip);
+    let plot = null, active = null;
+    const hide = () => { active = null; tip.style.display = "none"; };
+    const place = () => {
+        if (!active || !plot?.isConnected) return hide();
+        const note = plot.querySelectorAll(".barlayer .point path")[active.pointNumber];
+        if (!note) return hide();
+        const text = active.data.hovertext?.[active.pointNumber];
+        if (!text) return hide();
+        tip.textContent = text.replaceAll("<br>", "\\n");
+        const label = active.fullData.hoverlabel;
+        tip.style.background = label.bgcolor;
+        tip.style.color = label.font.color;
+        tip.style.borderColor = label.font.color;
+        tip.style.display = "block";
+        const box = note.getBoundingClientRect();
+        const container = root.getBoundingClientRect();
+        const width = tip.offsetWidth, height = tip.offsetHeight;
+        const start = active.data.base[active.pointNumber];
+        let left = start < 32 ? box.right - container.left + 8 :
+            box.left - container.left - width - 8;
+        let top = (box.top + box.bottom) / 2 - container.top - height / 2;
+        // A spanning note may leave no space on its chosen side.
+        // Move above/below it instead of covering it or clipping the text.
+        if (left < 8 || left + width > container.width - 8) {
+            left = Math.max(8, Math.min(left, container.width - width - 8));
+            top = box.top - container.top - height - 8;
+            if (top < 8) top = box.bottom - container.top + 8;
+        }
+        tip.style.left = left + "px";
+        tip.style.top = Math.max(8, Math.min(top, container.height - height - 8)) + "px";
+    };
+    const hover = event => {
+        active = event.points[0];
+        place();
+    };
+    const resize = new ResizeObserver(place);
+    const bind = () => {
+        const next = root.querySelector(".js-plotly-plot");
+        if (next === plot) return;
+        if (plot) {
+            plot.removeListener("plotly_hover", hover);
+            plot.removeListener("plotly_unhover", hide);
+            plot.removeListener("plotly_relayout", place);
+            plot.removeListener("plotly_afterplot", place);
+        }
+        resize.disconnect();
+        hide();
+        plot = next?.on ? next : null;
+        if (!plot) return;
+        plot.on("plotly_hover", hover);
+        plot.on("plotly_unhover", hide);
+        plot.on("plotly_relayout", place);
+        plot.on("plotly_afterplot", place);
+        resize.observe(plot);
+    };
+    root.addEventListener("mouseleave", hide);
+    new MutationObserver(bind).observe(root, {childList: true, subtree: true});
+    bind();
+}
+"""

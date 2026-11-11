@@ -126,24 +126,13 @@ def visualize_midi_plotly(input_midi):
             yanchor="bottom",
         )
 
-    hover_x, hover_y, hover_text = [], [], []
+    colors, hover_text = [], []
     for pitch, start, end, velocity in sixteenth_notes:
-        figure.add_shape(
-            type="rect",
-            x0=start,
-            x1=end,
-            y0=pitch - 0.4,
-            y1=pitch + 0.4,
-            fillcolor=_velocity_color(velocity),
-            line={"color": "rgba(255,255,255,0.3)", "width": 1},
-            layer="above",
-        )
+        colors.append(_velocity_color(velocity))
         bar = int(start // 16) + 1
         beat = int((start % 16) // 4) + 1
         subdivision = int(start % 4) + 1
         name, octave = _note_label(pitch)
-        hover_x.append((start + end) / 2)
-        hover_y.append(pitch)
         hover_text.append(
             f"Note: {name}{octave}<br>Velocity: {velocity}<br>"
             f"Position: Bar {bar}, Beat {beat}.{subdivision}<br>"
@@ -151,13 +140,18 @@ def visualize_midi_plotly(input_midi):
         )
 
     figure.add_trace(
-        go.Scatter(
-            x=hover_x,
-            y=hover_y,
-            mode="markers",
-            marker={"size": 10, "opacity": 0},
-            hoverinfo="text",
+        go.Bar(
+            orientation="h",
+            base=[start for _, start, _, _ in sixteenth_notes],
+            x=[end - start for _, start, end, _ in sixteenth_notes],
+            y=pitches,
+            width=0.8,
+            marker={
+                "color": colors,
+                "line": {"color": "rgba(255,255,255,0.3)", "width": 1},
+            },
             hovertext=hover_text,
+            hovertemplate="%{hovertext}<extra></extra>",
             hoverlabel={"bgcolor": GRID, "font_size": 12, "font_color": TEXT},
         )
     )
@@ -185,6 +179,7 @@ def visualize_midi_plotly(input_midi):
             "tickfont": {"color": TEXT, "size": 10},
         },
         showlegend=False,
+        barmode="overlay",
         margin={"l": 60, "r": 20, "t": 40, "b": 40},
         height=400,
         hoverdistance=20,

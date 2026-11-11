@@ -8,6 +8,8 @@ Features:
 - Toggleable history sidebar panel
 """
 
+import argparse
+import ipaddress
 import logging
 import os
 import tempfile
@@ -1749,8 +1751,28 @@ def create_demo(playback_status=None):
     return demo
 
 
-def main():
+def main(argv=None):
     """Run the Gradio app."""
+    parser = argparse.ArgumentParser(description="Run the Conductor Main UI.")
+    parser.add_argument("--host", default="127.0.0.1", help="Address to bind to")
+    parser.add_argument(
+        "--port", type=int, help="Port to listen on (Gradio default: 7860)"
+    )
+    parser.add_argument(
+        "--allow-network",
+        action="store_true",
+        help="Allow binding to a network address (the UI has no authentication)",
+    )
+    args = parser.parse_args(argv)
+    if args.port is not None and not 1 <= args.port <= 65535:
+        parser.error("--port must be between 1 and 65535")
+    try:
+        is_loopback = ipaddress.ip_address(args.host).is_loopback
+    except ValueError:
+        is_loopback = args.host.lower() == "localhost"
+    if not is_loopback and not args.allow_network:
+        parser.error("binding to a network address requires --allow-network")
+
     # Surface conductor_core (and app) log records on the console. Core only
     # emits records; configuring handlers is the application's responsibility.
     logging.basicConfig(
@@ -1766,6 +1788,8 @@ def main():
 
     demo = create_demo(playback_status=playback_status)
     demo.launch(
+        server_name=args.host,
+        server_port=args.port,
         allowed_paths=[str(Path(HISTORY_STORE.artifact_root).resolve())],
         css=APP_CSS,
     )

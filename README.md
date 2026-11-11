@@ -22,6 +22,17 @@ uv run --locked conductor-main
 
 The app opens at [http://127.0.0.1:7860/](http://127.0.0.1:7860/).
 
+To bind to a specific network interface and port:
+
+```powershell
+uv run --locked conductor-main --host "<tailscale-ip>" --port 7861 --allow-network
+```
+
+Replace `<tailscale-ip>` with this machine's Tailscale IP, then open
+`http://<tailscale-ip>:7861/` from a machine that can reach that interface.
+Network binding requires `--allow-network`; the UI has no authentication.
+`GRADIO_SERVER_NAME` is ignored; use `--host` to select the bind address.
+
 ## Key Features
 
 - Natural-language four-bar MIDI loop generation across multiple LLM providers (OpenAI, Anthropic, Google, Ollama).

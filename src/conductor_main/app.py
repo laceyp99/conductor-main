@@ -1081,11 +1081,6 @@ def get_history_choices():
     return choices
 
 
-def select_history_item(gen_id):
-    """Clear an old loaded indicator when the selected entry changes."""
-    return "Select Load to restore this generation." if gen_id else ""
-
-
 def loaded_history_status(gen_id):
     return "Loaded generation." if gen_id else "Generation was not loaded."
 
@@ -1626,7 +1621,6 @@ def create_demo(playback_status=None):
                 history_heading = gr.Markdown("## History")
 
                 with gr.Row() as history_actions:
-                    load_btn = gr.Button("Load", size="sm", variant="primary")
                     delete_btn = gr.Button("Delete...", size="sm", variant="stop")
                     refresh_btn = gr.Button("Refresh", size="sm")
                 with gr.Row(visible=False) as delete_confirmation:
@@ -1661,18 +1655,10 @@ def create_demo(playback_status=None):
 
         # .input fires only on user selection, not on programmatic list updates.
         history_list.input(
-            select_history_item,
-            inputs=[history_list],
-            outputs=[history_status],
-            show_progress="hidden",
-        ).then(
             hide_delete_confirmation,
             outputs=[history_actions, delete_confirmation],
             show_progress="hidden",
-        )
-
-        # Load history item into main view
-        load_btn.click(
+        ).then(
             load_history_item,
             inputs=[history_list],
             outputs=[

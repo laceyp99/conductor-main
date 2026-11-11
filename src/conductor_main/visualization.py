@@ -161,7 +161,7 @@ def visualize_midi_plotly(input_midi):
             hoverlabel={"bgcolor": GRID, "font_size": 12, "font_color": TEXT},
         )
     )
-    ticks = list(range(minimum, maximum + 1))
+    ticks = [pitch for pitch in range(minimum, maximum + 1) if pitch % 12 == 0]
     labels = [f"{name}{octave}" for name, octave in map(_note_label, ticks)]
     figure.update_layout(
         plot_bgcolor=BACKGROUND,

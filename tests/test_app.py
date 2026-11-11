@@ -1825,6 +1825,7 @@ def test_refresh_history_preserves_only_existing_selection(monkeypatch):
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
     assert app.refresh_history("gen_1")["value"] == "gen_1"
+    assert app.refresh_history()["value"] is None
     assert app.refresh_history("missing")["value"] is None
     assert app.toggle_history_sidebar(False, "gen_1")[3]["value"] == "gen_1"
     assert app.toggle_history_sidebar(False, "missing")[3]["value"] is None
@@ -2134,6 +2135,9 @@ def test_history_sidebar_uses_one_selector_and_confirmed_delete():
     ]
     assert dependencies["delete_history_item"]["inputs"][0] == selector
     assert dependencies["refresh_history"]["inputs"] == [selector]
+    # After generation, clear the previous selection so it can be selected again.
+    assert dependencies["refresh_history_1"]["inputs"] == []
+    assert dependencies["refresh_history_1"]["outputs"] == [selector]
     sidebar_controls = [
         component["props"].get("label") or component["props"].get("value")
         for component in demo.config["components"]

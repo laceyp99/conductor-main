@@ -1245,7 +1245,7 @@ def delete_history_item(
     )
 
 
-def refresh_history(selected_id):
+def refresh_history(selected_id=None):
     """Refresh entries and preserve selection only while its generation exists."""
     choices = get_history_choices()
     selection = (
@@ -1743,7 +1743,6 @@ def create_demo(playback_status=None):
             outputs=[rerender_button],
         ).then(
             refresh_history,
-            inputs=[history_list],
             outputs=[history_list],
         )
 

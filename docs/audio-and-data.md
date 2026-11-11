@@ -62,10 +62,12 @@ If the audio toolchain is unavailable, MIDI generation still succeeds. The app s
 
 Click **History** to open the recent-generation sidebar. From there you can:
 
-- Select a generation from the list, then click **Load** to restore it. The selected row stays highlighted, and the status shows when loading succeeds;
+- Select a generation from the list to restore it immediately. The selected row stays highlighted, and the status shows when loading succeeds. Generating a new loop clears the history selection;
 - Click **Delete...** to replace the action buttons with **Confirm Delete** and **Cancel**. Select another entry, click **Cancel**, or hide the sidebar to restore the usual buttons; confirm to remove the selected generation and its saved files;
 - **Refresh** the newest-first list after external changes. Selection remains if the generation still exists;
 - Inspect each entry on three lines: key, scale, and timestamp; model and reasoning setting; and the prompt, shortened with an ellipsis when it does not fit.
+
+Selecting an entry replaces the current audio, visualization, prompt, and generation controls, including unsaved edits. To restore the selected entry after editing controls, select another entry and then select it again. Selecting an entry for deletion also loads it; confirming deletion clears it from the main view.
 
 By default, the app keeps the newest 20 generations under its data directory:
 

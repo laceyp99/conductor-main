@@ -207,53 +207,62 @@ PIANO_ROLL_HOVER_JS = """
         "z-index:20;white-space:pre-line;padding:4px 6px;border:1px solid;" +
         "font:12px Arial,sans-serif;line-height:1.3;max-width:calc(100% - 16px)";
     root.append(tip);
-    const bound = new WeakSet();
+    let plot = null, active = null;
+    const hide = () => { active = null; tip.style.display = "none"; };
+    const place = () => {
+        if (!active || !plot?.isConnected) return hide();
+        const note = plot.querySelectorAll(".barlayer .point path")[active.pointNumber];
+        if (!note) return hide();
+        const text = active.data.hovertext?.[active.pointNumber];
+        if (!text) return hide();
+        tip.textContent = text.replaceAll("<br>", "\\n");
+        const label = active.fullData.hoverlabel;
+        tip.style.background = label.bgcolor;
+        tip.style.color = label.font.color;
+        tip.style.borderColor = label.font.color;
+        tip.style.display = "block";
+        const box = note.getBoundingClientRect();
+        const container = root.getBoundingClientRect();
+        const width = tip.offsetWidth, height = tip.offsetHeight;
+        const start = active.data.base[active.pointNumber];
+        let left = start < 32 ? box.right - container.left + 8 :
+            box.left - container.left - width - 8;
+        let top = (box.top + box.bottom) / 2 - container.top - height / 2;
+        // A spanning note may leave no space on its chosen side.
+        // Move above/below it instead of covering it or clipping the text.
+        if (left < 8 || left + width > container.width - 8) {
+            left = Math.max(8, Math.min(left, container.width - width - 8));
+            top = box.top - container.top - height - 8;
+            if (top < 8) top = box.bottom - container.top + 8;
+        }
+        tip.style.left = left + "px";
+        tip.style.top = Math.max(8, Math.min(top, container.height - height - 8)) + "px";
+    };
+    const hover = event => {
+        active = event.points[0];
+        place();
+    };
+    const resize = new ResizeObserver(place);
     const bind = () => {
-        const plot = root.querySelector(".js-plotly-plot");
-        if (!plot?.on || bound.has(plot)) return;
-        bound.add(plot);
-        tip.style.display = "none";
-        let active = null;
-        const hide = () => { active = null; tip.style.display = "none"; };
-        const place = () => {
-            if (!active || !plot.isConnected) return hide();
-            const note = plot.querySelectorAll(".barlayer .point path")[active.pointNumber];
-            if (!note) return hide();
-            const text = active.data.hovertext?.[active.pointNumber];
-            if (!text) return hide();
-            tip.textContent = text.replaceAll("<br>", "\\n");
-            const label = active.fullData.hoverlabel;
-            tip.style.background = label.bgcolor;
-            tip.style.color = label.font.color;
-            tip.style.borderColor = label.font.color;
-            tip.style.display = "block";
-            const box = note.getBoundingClientRect();
-            const container = root.getBoundingClientRect();
-            const width = tip.offsetWidth, height = tip.offsetHeight;
-            const start = active.data.base[active.pointNumber];
-            let left = start < 32 ? box.right - container.left + 8 :
-                box.left - container.left - width - 8;
-            let top = (box.top + box.bottom) / 2 - container.top - height / 2;
-            // A spanning note may leave no space on its chosen side.
-            // Move above/below it instead of covering it or clipping the text.
-            if (left < 8 || left + width > container.width - 8) {
-                left = Math.max(8, Math.min(left, container.width - width - 8));
-                top = box.top - container.top - height - 8;
-                if (top < 8) top = box.bottom - container.top + 8;
-            }
-            tip.style.left = left + "px";
-            tip.style.top = Math.max(8, Math.min(top, container.height - height - 8)) + "px";
-        };
-        plot.on("plotly_hover", event => {
-            active = event.points[0];
-            place();
-        });
+        const next = root.querySelector(".js-plotly-plot");
+        if (next === plot) return;
+        if (plot) {
+            plot.removeListener("plotly_hover", hover);
+            plot.removeListener("plotly_unhover", hide);
+            plot.removeListener("plotly_relayout", place);
+            plot.removeListener("plotly_afterplot", place);
+        }
+        resize.disconnect();
+        hide();
+        plot = next?.on ? next : null;
+        if (!plot) return;
+        plot.on("plotly_hover", hover);
         plot.on("plotly_unhover", hide);
         plot.on("plotly_relayout", place);
         plot.on("plotly_afterplot", place);
-        root.addEventListener("mouseleave", hide);
-        new ResizeObserver(place).observe(plot);
+        resize.observe(plot);
     };
+    root.addEventListener("mouseleave", hide);
     new MutationObserver(bind).observe(root, {childList: true, subtree: true});
     bind();
 }

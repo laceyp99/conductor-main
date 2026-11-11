@@ -2222,7 +2222,20 @@ def test_model_sync_callbacks_only_run_for_user_input():
     )
 
 
-def test_main_allows_gradio_to_serve_generation_history(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    ("argv", "host", "port"),
+    [
+        ([], "127.0.0.1", None),
+        (
+            ["--host", "100.87.21.22", "--port", "7861", "--allow-network"],
+            "100.87.21.22",
+            7861,
+        ),
+    ],
+)
+def test_main_allows_gradio_to_serve_generation_history(
+    monkeypatch, tmp_path, argv, host, port
+):
     artifact_root = tmp_path / "app-data" / "generations"
     launched_with = {}
 
@@ -2239,12 +2252,24 @@ def test_main_allows_gradio_to_serve_generation_history(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(app, "create_demo", lambda playback_status=None: FakeDemo())
 
-    app.main()
+    app.main(argv)
 
     assert launched_with == {
+        "server_name": host,
+        "server_port": port,
         "allowed_paths": [str(artifact_root.resolve())],
         "css": app.APP_CSS,
     }
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["--host", "100.87.21.22"], ["--port", "0"], ["--port", "65536"]],
+)
+def test_main_rejects_invalid_launch_arguments(argv):
+    with pytest.raises(SystemExit) as exc:
+        app.main(argv)
+    assert exc.value.code == 2
 
 
 def _clear_data_directory_environment(monkeypatch):

@@ -22,6 +22,15 @@ uv run --locked conductor-main
 
 The app opens at [http://127.0.0.1:7860/](http://127.0.0.1:7860/).
 
+To bind to a specific network interface and port:
+
+```powershell
+uv run conductor-main --host 100.87.21.22 --port 7861 --allow-network
+```
+
+Open `http://100.87.21.22:7861/` from a machine that can reach that interface.
+Network binding requires `--allow-network`; the UI has no authentication.
+
 ## Key Features
 
 - Natural-language four-bar MIDI loop generation across multiple LLM providers (OpenAI, Anthropic, Google, Ollama).

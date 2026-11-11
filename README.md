@@ -25,11 +25,13 @@ The app opens at [http://127.0.0.1:7860/](http://127.0.0.1:7860/).
 To bind to a specific network interface and port:
 
 ```powershell
-uv run conductor-main --host 100.87.21.22 --port 7861 --allow-network
+uv run --locked conductor-main --host "<tailscale-ip>" --port 7861 --allow-network
 ```
 
-Open `http://100.87.21.22:7861/` from a machine that can reach that interface.
+Replace `<tailscale-ip>` with this machine's Tailscale IP, then open
+`http://<tailscale-ip>:7861/` from a machine that can reach that interface.
 Network binding requires `--allow-network`; the UI has no authentication.
+`GRADIO_SERVER_NAME` is ignored; use `--host` to select the bind address.
 
 ## Key Features
 

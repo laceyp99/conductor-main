@@ -1825,6 +1825,7 @@ def test_refresh_history_preserves_only_existing_selection(monkeypatch):
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
     assert app.refresh_history("gen_1")["value"] == "gen_1"
+    assert app.refresh_history()["value"] is None
     assert app.refresh_history("missing")["value"] is None
     assert app.toggle_history_sidebar(False, "gen_1")[3]["value"] == "gen_1"
     assert app.toggle_history_sidebar(False, "missing")[3]["value"] is None
@@ -2111,8 +2112,10 @@ def test_history_sidebar_uses_one_selector_and_confirmed_delete():
         actions_id,
         confirmation_id,
     ]
-    # Programmatic list updates (delete, refresh, toggle) must not reset status.
-    assert dependencies["select_history_item"]["targets"] == [(selector, "input")]
+    # Only user selection starts the load chain, not delete/refresh/toggle updates.
+    selection = dependencies["hide_delete_confirmation"]
+    assert selection["targets"] == [(selector, "input")]
+    assert dependencies["load_history_item"]["trigger_after"] == selection["id"]
     assert dependencies["toggle_history_sidebar"]["outputs"][3:6] == [
         selector,
         actions_id,
@@ -2132,11 +2135,14 @@ def test_history_sidebar_uses_one_selector_and_confirmed_delete():
     ]
     assert dependencies["delete_history_item"]["inputs"][0] == selector
     assert dependencies["refresh_history"]["inputs"] == [selector]
+    # After generation, clear the previous selection so it can be selected again.
+    assert dependencies["refresh_history_1"]["inputs"] == []
+    assert dependencies["refresh_history_1"]["outputs"] == [selector]
     sidebar_controls = [
         component["props"].get("label") or component["props"].get("value")
         for component in demo.config["components"]
     ]
-    assert sidebar_controls.index("Load") < sidebar_controls.index("Recent Generations")
+    assert "Load" not in sidebar_controls
     assert sidebar_controls.index("Delete...") < sidebar_controls.index(
         "Recent Generations"
     )

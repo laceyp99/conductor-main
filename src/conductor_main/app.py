@@ -89,7 +89,7 @@ APP_CSS = """
     grid-template-columns: 1fr auto minmax(max-content, 1fr);
     align-items: center;
 }
-.app-header > :first-child {
+.app-header .app-title {
     grid-column: 2;
 }
 .app-header .history-toggle {
@@ -1300,7 +1300,9 @@ def create_demo(playback_status=None):
 
         # Header with title centered on the original full-width layout
         with gr.Row(elem_classes=["app-header"]):
-            gr.Markdown("<h1 class='center-title'>Conductor</h1>")
+            gr.Markdown(
+                "<h1 class='center-title'>Conductor</h1>", elem_classes=["app-title"]
+            )
             history_toggle_btn = gr.Button(
                 "History",
                 size="sm",

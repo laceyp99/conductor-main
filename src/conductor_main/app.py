@@ -15,13 +15,15 @@ import os
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from queue import Empty, Queue
 
 import gradio as gr
 from conductor_core import (
+    AudioCommitRecoveryError,
     AudioRenderingError,
+    AudioUpdateInProgressError,
     EngineConfig,
     GenerationRequest,
     LoopGenerationEngine,
@@ -167,6 +169,8 @@ HISTORY_STORE = FilesystemArtifactStore(
     APP_DATA_DIR / "generations",
     max_generations=MAX_HISTORY_GENERATIONS,
 )
+# Recovery failures invalidate audio for every browser session in this process.
+_AUDIO_RECOVERY_ERRORS: dict[tuple[Path, str], str] = {}
 
 
 def load_history():
@@ -194,9 +198,9 @@ def delete_generation(gen_id):
     return HISTORY_STORE.delete_generation(gen_id)
 
 
-def update_generation_audio(gen_id, audio_path, soundfont=None):
-    return HISTORY_STORE.update_generation_audio(
-        gen_id, audio_path, soundfont=soundfont
+def audio_recovery_error(gen_id):
+    return _AUDIO_RECOVERY_ERRORS.get(
+        (Path(HISTORY_STORE.artifact_root).resolve(), gen_id)
     )
 
 
@@ -749,6 +753,9 @@ def rerender_current_audio(
     current_audio_path,
 ):
     """Re-render the current MIDI file with the selected SoundFont on demand."""
+    if recovery_error := audio_recovery_error(generation_id):
+        return None, recovery_error, None, None
+
     if not midi_path:
         return (
             current_audio_path,
@@ -786,30 +793,46 @@ def rerender_current_audio(
             current_audio_path,
         )
 
-    output_path = current_audio_path or str(Path(midi_path).with_suffix(".mp3"))
     try:
-        rendered_audio_path = midi_to_mp3(
-            midi_path,
-            output_path=output_path,
-            soundfont_name=selected_soundfont,
+        if generation_id:
+            with HISTORY_STORE.stage_generation_audio(generation_id) as stage:
+                midi_to_mp3(
+                    midi_path,
+                    output_path=stage.path,
+                    soundfont_name=selected_soundfont,
+                )
+                updated_generation = stage.commit(soundfont=selected_soundfont)
+            persisted_audio_path = updated_generation.audio_path
+        else:
+            persisted_audio_path = midi_to_mp3(
+                midi_path,
+                output_path=current_audio_path
+                or str(Path(midi_path).with_suffix(".mp3")),
+                soundfont_name=selected_soundfont,
+            )
+    except AudioCommitRecoveryError as exc:
+        message = (
+            "Audio is unavailable until manual recovery. "
+            f"Recovery folder: {exc.recovery_directory}. "
+            "Reconcile the saved audio and metadata before restarting the app "
+            "and loading this generation again."
         )
-    except AudioRenderingError as exc:
+        _AUDIO_RECOVERY_ERRORS[
+            (Path(HISTORY_STORE.artifact_root).resolve(), generation_id)
+        ] = message
+        return None, message, None, None
+    except (
+        AudioRenderingError,
+        AudioUpdateInProgressError,
+        OSError,
+        ValueError,
+    ) as exc:
         return (
             current_audio_path,
             str(exc),
             saved_soundfont,
             current_audio_path,
         )
-
-    persisted_audio_path = rendered_audio_path
-    if generation_id:
-        updated_generation = update_generation_audio(
-            generation_id,
-            rendered_audio_path,
-            soundfont=selected_soundfont,
-        )
-        if updated_generation and updated_generation.audio_path:
-            persisted_audio_path = updated_generation.audio_path
 
     return (
         persisted_audio_path,
@@ -859,7 +882,7 @@ def save_prompts(loop_gen_text):
             temporary_path.unlink(missing_ok=True)
     return (
         "Prompts saved successfully at "
-        + datetime.now(timezone.utc).astimezone().strftime("%I:%M:%S %p on %B %d, %Y")
+        + datetime.now(UTC).astimezone().strftime("%I:%M:%S %p on %B %d, %Y")
         + "."
     )
 
@@ -1175,7 +1198,11 @@ def load_history_item(gen_id):
         )
 
     warnings = []
-    if gen.soundfont:
+    recovery_error = audio_recovery_error(gen_id)
+    saved_soundfont = None if recovery_error else gen.soundfont
+    if recovery_error:
+        warnings.append(recovery_error)
+    if saved_soundfont:
         saved_soundfont_name = Path(gen.soundfont).name
         if saved_soundfont_name not in get_soundfont_choices():
             warnings.append(f"Missing SoundFont: {saved_soundfont_name}.")
@@ -1192,19 +1219,23 @@ def load_history_item(gen_id):
 
     # Get audio path if it exists
     audio_path = (
-        gen.audio_path if gen.audio_path and Path(gen.audio_path).exists() else None
+        gen.audio_path
+        if not recovery_error and gen.audio_path and Path(gen.audio_path).exists()
+        else None
     )
 
     return (
         gen.midi_path,
         audio_path,
-        get_soundfont_dropdown_update(gen.soundfont),
+        get_soundfont_dropdown_update(saved_soundfont),
         visualization,
         " ".join(warnings),
         gen.id,
-        gen.soundfont,
+        saved_soundfont,
         audio_path,
-        get_rerender_button_update(gen.soundfont, gen.midi_path),
+        gr.update(interactive=False)
+        if recovery_error
+        else get_rerender_button_update(saved_soundfont, gen.midi_path),
         *control_updates.as_tuple(),
     )
 

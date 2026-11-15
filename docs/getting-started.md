@@ -2,6 +2,8 @@
 
 ## Installation
 
+Python 3.11 or newer is required.
+
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run these commands from the `conductor-main` project directory:
 
 ```powershell

@@ -60,7 +60,7 @@ If the audio toolchain is unavailable, MIDI generation still succeeds. The app s
 
 Re-rendering saved audio uses Core's staged commit so a failed render or a confirmed rollback preserves the previous audio and SoundFont metadata. Errors appear in the UI.
 
-If both the commit and rollback fail, the app clears playback and saved-SoundFont state and blocks audio for that generation for the rest of the running app process, including when selected from history again. MIDI remains available. The error shows the recovery folder retained by Core. Manually reconcile the saved audio and metadata using those recovery files before restarting the app and loading that generation again. Restarting alone does not repair the files, and the app does not automatically reconcile recovery artifacts.
+If both the commit and rollback fail, the app clears playback and saved-SoundFont state and disables re-rendering for that generation for the rest of the running app process, including when selected from history again. MIDI remains available. Status shows "Audio recovery is required. MIDI is still available." followed by the recovery folder retained by Core. Refreshing SoundFonts preserves that warning and keeps re-rendering disabled. Ordinary render failures and successful rollbacks remain retryable when the audio toolchain is available. Manually reconcile the saved audio and metadata using those recovery files before restarting the app and loading that generation again. Restarting alone does not repair the files, and the app does not automatically reconcile recovery artifacts.
 
 ## History and Saved Generations
 

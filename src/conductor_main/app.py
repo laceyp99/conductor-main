@@ -720,28 +720,36 @@ def rerender_available(soundfont_choice=None, midi_path=None):
     )
 
 
-def get_rerender_button_update(soundfont_choice=None, midi_path=None):
+def get_rerender_button_update(
+    soundfont_choice=None, midi_path=None, generation_id=None
+):
     """Build a button update for the current rerender availability."""
-    return gr.update(interactive=rerender_available(soundfont_choice, midi_path))
+    return gr.update(
+        interactive=not audio_recovery_error(generation_id)
+        and rerender_available(soundfont_choice, midi_path)
+    )
 
 
 def get_soundfont_status_message(soundfont_choice=None):
     """Build the status text for the current SoundFont and playback state."""
     selected_soundfont = get_selected_soundfont(soundfont_choice)
-    playback_available, _ = is_playback_available(selected_soundfont)
+    playback_available, playback_error = is_playback_available(selected_soundfont)
 
     if playback_available and selected_soundfont:
         return f"Found {len(get_soundfont_choices())} SoundFonts. Selected {selected_soundfont}."
 
-    return get_playback_status_message(selected_soundfont)
+    return f"Audio unavailable. {playback_error or 'Check audio setup.'}"
 
 
-def refresh_soundfont_controls(soundfont_choice=None, midi_path=None):
+def refresh_soundfont_controls(
+    soundfont_choice=None, midi_path=None, generation_id=None
+):
     """Refresh SoundFont UI controls from the filesystem."""
     return (
         get_soundfont_dropdown_update(soundfont_choice),
-        get_rerender_button_update(soundfont_choice, midi_path),
-        get_soundfont_status_message(soundfont_choice),
+        get_rerender_button_update(soundfont_choice, midi_path, generation_id),
+        audio_recovery_error(generation_id)
+        or get_soundfont_status_message(soundfont_choice),
     )
 
 
@@ -776,7 +784,7 @@ def rerender_current_audio(
     if not selected_soundfont:
         return (
             current_audio_path,
-            get_playback_status_message(soundfont_choice),
+            get_soundfont_status_message(soundfont_choice),
             saved_soundfont,
             current_audio_path,
         )
@@ -812,10 +820,8 @@ def rerender_current_audio(
             )
     except AudioCommitRecoveryError as exc:
         message = (
-            "Audio is unavailable until manual recovery. "
-            f"Recovery folder: {exc.recovery_directory}. "
-            "Reconcile the saved audio and metadata before restarting the app "
-            "and loading this generation again."
+            "Audio recovery is required. MIDI is still available. "
+            f"Recovery files: {exc.recovery_directory}"
         )
         _AUDIO_RECOVERY_ERRORS[
             (Path(HISTORY_STORE.artifact_root).resolve(), generation_id)
@@ -1113,6 +1119,8 @@ def get_history_choices():
 
 
 def loaded_history_status(gen_id):
+    if audio_recovery_error(gen_id):
+        return "Loaded MIDI. Audio recovery is required."
     return "Loaded generation." if gen_id else "Generation was not loaded."
 
 
@@ -1233,9 +1241,7 @@ def load_history_item(gen_id):
         gen.id,
         saved_soundfont,
         audio_path,
-        gr.update(interactive=False)
-        if recovery_error
-        else get_rerender_button_update(saved_soundfont, gen.midi_path),
+        get_rerender_button_update(saved_soundfont, gen.midi_path, gen_id),
         *control_updates.as_tuple(),
     )
 
@@ -1261,7 +1267,9 @@ def delete_history_item(
             current_generation_id,
             current_saved_soundfont,
             current_audio_path,
-            get_rerender_button_update(soundfont_choice, midi_path),
+            get_rerender_button_update(
+                soundfont_choice, midi_path, current_generation_id
+            ),
         )
 
     success = delete_generation(gen_id)
@@ -1279,7 +1287,9 @@ def delete_history_item(
         None if deleted_active else current_saved_soundfont,
         None if deleted_active else current_audio_path,
         get_rerender_button_update(
-            soundfont_choice, None if deleted_active else midi_path
+            soundfont_choice,
+            None if deleted_active else midi_path,
+            None if deleted_active else current_generation_id,
         ),
     )
 
@@ -1602,7 +1612,7 @@ def create_demo(playback_status=None):
                         cancels=[gen_event],
                     ).then(
                         get_rerender_button_update,
-                        inputs=[soundfont_input, prog_output],
+                        inputs=[soundfont_input, prog_output, current_generation_id],
                         outputs=[rerender_button],
                     )
                     rerender_button.click(
@@ -1620,10 +1630,14 @@ def create_demo(playback_status=None):
                             current_saved_soundfont,
                             current_audio_path,
                         ],
+                    ).then(
+                        get_rerender_button_update,
+                        inputs=[soundfont_input, prog_output, current_generation_id],
+                        outputs=[rerender_button],
                     )
                     refresh_soundfonts_button.click(
                         refresh_soundfont_controls,
-                        inputs=[soundfont_input, prog_output],
+                        inputs=[soundfont_input, prog_output, current_generation_id],
                         outputs=[soundfont_input, rerender_button, error_message],
                     )
                     audio_output.pause(
@@ -1781,7 +1795,7 @@ def create_demo(playback_status=None):
 
         gen_event.then(
             get_rerender_button_update,
-            inputs=[soundfont_input, prog_output],
+            inputs=[soundfont_input, prog_output, current_generation_id],
             outputs=[rerender_button],
         ).then(
             refresh_history,

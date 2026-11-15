@@ -1610,6 +1610,7 @@ def test_rerender_current_audio_preserves_state_on_store_failure(
 ):
     gen = saved_audio_generation
     monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "custom.sf2")
+    monkeypatch.setattr(app, "is_playback_available", lambda choice=None: (True, None))
 
     def fail_stage(gen_id):
         raise failure
@@ -1618,6 +1619,12 @@ def test_rerender_current_audio_preserves_state_on_store_failure(
     assert app.rerender_current_audio(
         gen.midi_path, "custom.sf2", "old.sf2", gen.id, gen.audio_path
     ) == (gen.audio_path, str(failure), "old.sf2", gen.audio_path)
+    assert (
+        app.get_rerender_button_update("custom.sf2", gen.midi_path, gen.id)[
+            "interactive"
+        ]
+        is True
+    )
 
 
 @pytest.mark.parametrize("rollback_fails", [False, True])
@@ -1667,7 +1674,10 @@ def test_rerender_commit_failure_preserves_or_blocks_audio(
     recovery_dir = next(Path(gen.midi_path).parent.glob(".audio-*"))
     assert recovery_dir.is_dir()
     assert str(recovery_dir) in result[1]
-    assert "manual recovery" in result[1]
+    assert result[1] == (
+        "Audio recovery is required. MIDI is still available. "
+        f"Recovery files: {recovery_dir}"
+    )
 
     def unexpected_render(*args, **kwargs):
         raise AssertionError(
@@ -1686,6 +1696,20 @@ def test_rerender_commit_failure_preserves_or_blocks_audio(
     assert loaded[1] is loaded[6] is loaded[7] is None
     assert str(recovery_dir) in loaded[4]
     assert loaded[8]["interactive"] is False
+    refreshed = app.refresh_soundfont_controls("custom.sf2", gen.midi_path, gen.id)
+    assert refreshed[1]["interactive"] is False
+    assert refreshed[2] == result[1]
+    assert (
+        app.loaded_history_status(gen.id) == "Loaded MIDI. Audio recovery is required."
+    )
+
+    monkeypatch.setattr(app, "is_playback_available", lambda choice=None: (True, None))
+    assert (
+        app.get_rerender_button_update("custom.sf2", gen.midi_path, "other-generation")[
+            "interactive"
+        ]
+        is True
+    )
 
 
 def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tmp_path):
@@ -1829,7 +1853,7 @@ def test_refresh_soundfont_controls_updates_dropdown_choices(monkeypatch):
         midi_path.unlink(missing_ok=True)
 
 
-def test_refresh_soundfont_controls_prefers_dependency_status_message(monkeypatch):
+def test_refresh_soundfont_controls_shows_concise_dependency_status(monkeypatch):
     monkeypatch.setattr(
         app, "get_soundfont_choices", lambda: ["FM-Piano1 20190916.sf2", "new.sf2"]
     )
@@ -1842,13 +1866,6 @@ def test_refresh_soundfont_controls_prefers_dependency_status_message(monkeypatc
             "FluidSynth is not installed or not in PATH",
         ),
     )
-    monkeypatch.setattr(
-        app,
-        "get_playback_status_message",
-        lambda soundfont_name=None: (
-            "Audio playback is not available. Setup required:\n  - Install FluidSynth: https://github.com/FluidSynth/fluidsynth/releases"
-        ),
-    )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
     dropdown_update, rerender_update, status_message = app.refresh_soundfont_controls(
@@ -1858,9 +1875,9 @@ def test_refresh_soundfont_controls_prefers_dependency_status_message(monkeypatc
     assert dropdown_update["choices"] == ["FM-Piano1 20190916.sf2", "new.sf2"]
     assert dropdown_update["value"] == "new.sf2"
     assert rerender_update["interactive"] is False
-    assert status_message == (
-        "Audio playback is not available. Setup required:\n"
-        "  - Install FluidSynth: https://github.com/FluidSynth/fluidsynth/releases"
+    assert (
+        status_message
+        == "Audio unavailable. FluidSynth is not installed or not in PATH"
     )
 
 
@@ -2247,6 +2264,19 @@ def test_history_sidebar_uses_one_selector_and_confirmed_delete():
     # After generation, clear the previous selection so it can be selected again.
     assert dependencies["refresh_history_1"]["inputs"] == []
     assert dependencies["refresh_history_1"]["outputs"] == [selector]
+    rerender = dependencies["rerender_current_audio"]
+    generation_id = rerender["inputs"][3]
+    button_update = next(
+        dependency
+        for dependency in demo.config["dependencies"]
+        if dependency["trigger_after"] == rerender["id"]
+    )
+    assert button_update["inputs"][-1] == generation_id
+    assert dependencies["refresh_soundfont_controls"]["inputs"][-1] == generation_id
+    assert (
+        button_update["outputs"]
+        == dependencies["refresh_soundfont_controls"]["outputs"][1:2]
+    )
     sidebar_controls = [
         component["props"].get("label") or component["props"].get("value")
         for component in demo.config["components"]

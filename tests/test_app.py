@@ -1,10 +1,12 @@
 import asyncio
+from datetime import UTC
 from pathlib import Path
 from threading import Event, Thread
 from types import SimpleNamespace
 
 import pytest
 from conductor_core import AudioRenderingError, GenerationMetadata
+from conductor_core import storage as core_storage
 from conductor_core.errors import ProviderConnectionError
 from gradio.state_holder import SessionState
 
@@ -17,6 +19,7 @@ PRODUCTION_HISTORY_STORE = app.HISTORY_STORE
 def isolated_app_data(monkeypatch, tmp_path):
     """Keep UI callbacks away from personal history and saved prompts."""
     data_dir = tmp_path / "app-data"
+    monkeypatch.setattr(app, "_AUDIO_RECOVERY_ERRORS", {})
     monkeypatch.setattr(app, "APP_DATA_DIR", data_dir)
     monkeypatch.setattr(
         app, "PROMPT_OVERRIDE_PATH", data_dir / "Prompts" / "loop gen.txt"
@@ -1517,65 +1520,195 @@ def test_rerender_current_audio_skips_existing_matching_soundfont(
     assert current_audio_path == str(audio_path)
 
 
-def test_rerender_current_audio_updates_saved_generation(monkeypatch, tmp_path):
-    midi_path = _write_binary_file(tmp_path / "loop.mid")
-    rendered_audio = _write_binary_file(tmp_path / "rendered.mp3", b"rendered")
+@pytest.fixture
+def saved_audio_generation():
+    workspace = app.HISTORY_STORE.create_generation_workspace()
+    _write_binary_file(Path(workspace.midi_path))
+    _write_binary_file(Path(workspace.audio_path), b"old audio")
+    return app.HISTORY_STORE.finalize_generation(
+        workspace,
+        prompt="saved prompt",
+        key="C",
+        scale="minor",
+        model=next(iter(app.get_model_info()["models"]["Google"])),
+        provider="Google",
+        temperature=0.1,
+        soundfont="old.sf2",
+    )
+
+
+def test_rerender_current_audio_updates_saved_generation(
+    monkeypatch, saved_audio_generation
+):
+    gen = saved_audio_generation
 
     monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "custom.sf2")
-    monkeypatch.setattr(
-        app,
-        "midi_to_mp3",
-        lambda midi_path, output_path=None, soundfont_name=None: str(rendered_audio),
-    )
-    monkeypatch.setattr(
-        app,
-        "update_generation_audio",
-        lambda gen_id, audio_path, soundfont=None: SimpleNamespace(
-            audio_path=str(tmp_path / "saved-loop.mp3"),
-            soundfont=soundfont,
-        ),
-    )
+
+    def render(midi_path, output_path, soundfont_name):
+        assert output_path != gen.audio_path
+        assert Path(gen.audio_path).read_bytes() == b"old audio"
+        assert app.get_generation(gen.id).soundfont == "old.sf2"
+        _write_binary_file(Path(output_path), b"rendered")
+        return output_path
+
+    monkeypatch.setattr(app, "midi_to_mp3", render)
 
     rerendered_audio_path, status, saved_soundfont, current_audio_path = (
         app.rerender_current_audio(
-            str(midi_path),
+            gen.midi_path,
             "custom.sf2",
             "old.sf2",
-            "gen_1",
-            None,
+            gen.id,
+            gen.audio_path,
         )
     )
 
-    assert rerendered_audio_path == str(tmp_path / "saved-loop.mp3")
+    assert rerendered_audio_path == gen.audio_path
     assert status == "Rendered audio with custom.sf2."
     assert saved_soundfont == "custom.sf2"
-    assert current_audio_path == str(tmp_path / "saved-loop.mp3")
+    assert current_audio_path == gen.audio_path
+    assert Path(gen.audio_path).read_bytes() == b"rendered"
+    assert app.get_generation(gen.id).soundfont == "custom.sf2"
 
 
-def test_rerender_current_audio_reports_core_rendering_error(monkeypatch, tmp_path):
-    midi_path = _write_binary_file(tmp_path / "loop.mid")
-    current_audio = _write_binary_file(tmp_path / "current.mp3")
+def test_rerender_current_audio_reports_core_rendering_error(
+    monkeypatch, saved_audio_generation
+):
+    gen = saved_audio_generation
 
     monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "custom.sf2")
 
     def fail_render(*args, **kwargs):
+        _write_binary_file(Path(kwargs["output_path"]), b"partial render")
         raise AudioRenderingError("FluidSynth timed out")
 
     monkeypatch.setattr(app, "midi_to_mp3", fail_render)
 
     result = app.rerender_current_audio(
-        str(midi_path),
+        gen.midi_path,
         "custom.sf2",
         "old.sf2",
-        "gen_1",
-        str(current_audio),
+        gen.id,
+        gen.audio_path,
     )
 
     assert result == (
-        str(current_audio),
+        gen.audio_path,
         "FluidSynth timed out",
         "old.sf2",
-        str(current_audio),
+        gen.audio_path,
+    )
+    assert Path(gen.audio_path).read_bytes() == b"old audio"
+    assert app.get_generation(gen.id).soundfont == "old.sf2"
+
+
+@pytest.mark.parametrize(
+    "failure", [OSError("commit failed"), app.AudioUpdateInProgressError("busy")]
+)
+def test_rerender_current_audio_preserves_state_on_store_failure(
+    monkeypatch, saved_audio_generation, failure
+):
+    gen = saved_audio_generation
+    monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "custom.sf2")
+    monkeypatch.setattr(app, "is_playback_available", lambda choice=None: (True, None))
+
+    def fail_stage(gen_id):
+        raise failure
+
+    monkeypatch.setattr(app.HISTORY_STORE, "stage_generation_audio", fail_stage)
+    assert app.rerender_current_audio(
+        gen.midi_path, "custom.sf2", "old.sf2", gen.id, gen.audio_path
+    ) == (gen.audio_path, str(failure), "old.sf2", gen.audio_path)
+    assert (
+        app.get_rerender_button_update("custom.sf2", gen.midi_path, gen.id)[
+            "interactive"
+        ]
+        is True
+    )
+
+
+@pytest.mark.parametrize("rollback_fails", [False, True])
+def test_rerender_commit_failure_preserves_or_blocks_audio(
+    monkeypatch, saved_audio_generation, rollback_fails
+):
+    gen = saved_audio_generation
+    monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "custom.sf2")
+    monkeypatch.setattr(
+        app,
+        "midi_to_mp3",
+        lambda midi_path, output_path, soundfont_name: _write_binary_file(
+            Path(output_path)
+        ),
+    )
+
+    replace = core_storage.os.replace
+    audio_promoted = False
+
+    def fail_promotion(source, destination):
+        nonlocal audio_promoted
+        if Path(destination).name == "metadata.json":
+            raise OSError("metadata promotion failed")
+        if str(destination) == gen.audio_path:
+            if audio_promoted and rollback_fails:
+                raise OSError("audio rollback failed")
+            audio_promoted = True
+        return replace(source, destination)
+
+    monkeypatch.setattr(core_storage.os, "replace", fail_promotion)
+    result = app.rerender_current_audio(
+        gen.midi_path, "custom.sf2", "old.sf2", gen.id, gen.audio_path
+    )
+    if not rollback_fails:
+        assert result == (
+            gen.audio_path,
+            "metadata promotion failed",
+            "old.sf2",
+            gen.audio_path,
+        )
+        assert Path(gen.audio_path).read_bytes() == b"old audio"
+        assert app.get_generation(gen.id).soundfont == "old.sf2"
+        assert app.audio_recovery_error(gen.id) is None
+        return
+
+    assert result[0] is result[2] is result[3] is None
+    recovery_dir = next(Path(gen.midi_path).parent.glob(".audio-*"))
+    assert recovery_dir.is_dir()
+    assert str(recovery_dir) in result[1]
+    assert result[1] == (
+        "Audio recovery is required. MIDI is still available. "
+        f"Recovery files: {recovery_dir}"
+    )
+
+    def unexpected_render(*args, **kwargs):
+        raise AssertionError(
+            "Blocked audio must not render or take the matching-font shortcut"
+        )
+
+    monkeypatch.setattr(app, "midi_to_mp3", unexpected_render)
+    assert (
+        app.rerender_current_audio(
+            gen.midi_path, "old.sf2", "old.sf2", gen.id, gen.audio_path
+        )
+        == result
+    )
+    loaded = app.load_history_item(gen.id)
+    assert loaded[0] == gen.midi_path
+    assert loaded[1] is loaded[6] is loaded[7] is None
+    assert str(recovery_dir) in loaded[4]
+    assert loaded[8]["interactive"] is False
+    refreshed = app.refresh_soundfont_controls("custom.sf2", gen.midi_path, gen.id)
+    assert refreshed[1]["interactive"] is False
+    assert refreshed[2] == result[1]
+    assert (
+        app.loaded_history_status(gen.id) == "Loaded MIDI. Audio recovery is required."
+    )
+
+    monkeypatch.setattr(app, "is_playback_available", lambda choice=None: (True, None))
+    assert (
+        app.get_rerender_button_update("custom.sf2", gen.midi_path, "other-generation")[
+            "interactive"
+        ]
+        is True
     )
 
 
@@ -1720,7 +1853,7 @@ def test_refresh_soundfont_controls_updates_dropdown_choices(monkeypatch):
         midi_path.unlink(missing_ok=True)
 
 
-def test_refresh_soundfont_controls_prefers_dependency_status_message(monkeypatch):
+def test_refresh_soundfont_controls_shows_concise_dependency_status(monkeypatch):
     monkeypatch.setattr(
         app, "get_soundfont_choices", lambda: ["FM-Piano1 20190916.sf2", "new.sf2"]
     )
@@ -1733,13 +1866,6 @@ def test_refresh_soundfont_controls_prefers_dependency_status_message(monkeypatc
             "FluidSynth is not installed or not in PATH",
         ),
     )
-    monkeypatch.setattr(
-        app,
-        "get_playback_status_message",
-        lambda soundfont_name=None: (
-            "Audio playback is not available. Setup required:\n  - Install FluidSynth: https://github.com/FluidSynth/fluidsynth/releases"
-        ),
-    )
     monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
 
     dropdown_update, rerender_update, status_message = app.refresh_soundfont_controls(
@@ -1749,9 +1875,9 @@ def test_refresh_soundfont_controls_prefers_dependency_status_message(monkeypatc
     assert dropdown_update["choices"] == ["FM-Piano1 20190916.sf2", "new.sf2"]
     assert dropdown_update["value"] == "new.sf2"
     assert rerender_update["interactive"] is False
-    assert status_message == (
-        "Audio playback is not available. Setup required:\n"
-        "  - Install FluidSynth: https://github.com/FluidSynth/fluidsynth/releases"
+    assert (
+        status_message
+        == "Audio unavailable. FluidSynth is not installed or not in PATH"
     )
 
 
@@ -1778,7 +1904,7 @@ def test_history_choices_show_context_in_newest_first_order(monkeypatch):
     entries = [
         SimpleNamespace(
             id=identifier,
-            timestamp=FixedOffsetTimestamp(2026, 1, day, 12, 0, tzinfo=timezone.utc),
+            timestamp=FixedOffsetTimestamp(2026, 1, day, 12, 0, tzinfo=UTC),
             prompt="similar prompt " + identifier,
             key="C",
             scale="Major",
@@ -1797,11 +1923,11 @@ def test_history_choices_show_context_in_newest_first_order(monkeypatch):
 
 
 def test_history_labels_keep_prompt_on_one_bounded_line(monkeypatch):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     entry = SimpleNamespace(
         id="gen",
-        timestamp=datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 1, 2, 12, 0, tzinfo=UTC),
         prompt="first line\n\nsecond\tline " + "x" * 200,
         key="C",
         scale="Major",
@@ -2138,6 +2264,19 @@ def test_history_sidebar_uses_one_selector_and_confirmed_delete():
     # After generation, clear the previous selection so it can be selected again.
     assert dependencies["refresh_history_1"]["inputs"] == []
     assert dependencies["refresh_history_1"]["outputs"] == [selector]
+    rerender = dependencies["rerender_current_audio"]
+    generation_id = rerender["inputs"][3]
+    button_update = next(
+        dependency
+        for dependency in demo.config["dependencies"]
+        if dependency["trigger_after"] == rerender["id"]
+    )
+    assert button_update["inputs"][-1] == generation_id
+    assert dependencies["refresh_soundfont_controls"]["inputs"][-1] == generation_id
+    assert (
+        button_update["outputs"]
+        == dependencies["refresh_soundfont_controls"]["outputs"][1:2]
+    )
     sidebar_controls = [
         component["props"].get("label") or component["props"].get("value")
         for component in demo.config["components"]

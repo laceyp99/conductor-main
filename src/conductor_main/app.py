@@ -81,15 +81,21 @@ CORE_KEY_TO_UI = {
 }
 APP_CSS = """
 .center-title { text-align: center; font-size: 3em; }
+/* Center the title between equal side columns; the button's column never
+   shrinks below the button, so a narrow header shifts the title instead of
+   overlapping it. */
 .app-header {
-    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto minmax(max-content, 1fr);
+    align-items: center;
+}
+.app-header .app-title {
+    grid-column: 2;
 }
 .app-header .history-toggle {
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    z-index: 1;
+    grid-column: 3;
+    justify-self: end;
+    width: auto;
 }
 .history-sidebar {
     background: var(--background-fill-primary);
@@ -1294,10 +1300,13 @@ def create_demo(playback_status=None):
 
         # Header with title centered on the original full-width layout
         with gr.Row(elem_classes=["app-header"]):
-            gr.Markdown("<h1 class='center-title'>Conductor</h1>")
+            gr.Markdown(
+                "<h1 class='center-title'>Conductor</h1>", elem_classes=["app-title"]
+            )
             history_toggle_btn = gr.Button(
                 "History",
                 size="sm",
+                min_width=0,
                 elem_classes=["history-toggle"],
             )
 

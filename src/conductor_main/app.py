@@ -4,7 +4,7 @@ This file is using Gradio for the Conductor application. It makes the generation
 Features:
 - Text to MIDI generation with multiple AI providers
 - Audio playback of generated MIDI using FluidSynth
-- Session history with persistent storage (up to 20 generations)
+- Session history with persistent storage (kept until deleted)
 - Toggleable history sidebar panel
 """
 

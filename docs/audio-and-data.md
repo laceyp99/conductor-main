@@ -11,7 +11,7 @@ Conductor applications share a single user-accessible data root. By default, thi
 └── soundfonts/         # user-supplied SoundFonts
 ```
 
-On Windows, `~` normally expands to `%USERPROFILE%`, so the same location is `%USERPROFILE%\.conductor\main`. These files survive repository, virtual environment, and package replacement. Back up `Prompts` and any user-supplied SoundFonts as durable user data. Generation history is retained to the newest 20 items and can be deleted through the History sidebar when reclaiming space.
+On Windows, `~` normally expands to `%USERPROFILE%`, so the same location is `%USERPROFILE%\.conductor\main`. These files survive repository, virtual environment, and package replacement. Back up `Prompts` and any user-supplied SoundFonts as durable user data. Generation history is kept until you delete it through the History sidebar, so remove old entries there when reclaiming space.
 
 ### Location Precedence
 
@@ -58,9 +58,9 @@ Use **Refresh SoundFonts** after adding a SoundFont while the app is running. Se
 
 If the audio toolchain is unavailable, MIDI generation still succeeds. The app shows the setup problem and leaves playback empty.
 
-Re-rendering saved audio uses Core's staged commit so a failed render or a confirmed rollback preserves the previous audio and SoundFont metadata. Errors appear in the UI.
+Re-rendering saved audio uses Core's staged commit so a failed render or a confirmed rollback preserves the previous audio and SoundFont metadata. Each successful re-render is saved under a new timestamped name, such as `loop-20261120_153012_123456.mp3`, so the player loads the new file instead of a cached copy. Core removes the replaced file after recording the new one; on Windows, a file still held open is removed on the next re-render instead. Errors appear in the UI.
 
-If both the commit and rollback fail, the app clears playback and saved-SoundFont state and disables re-rendering for that generation for the rest of the running app process, including when selected from history again. MIDI remains available. Status shows "Audio recovery is required. MIDI is still available." followed by the recovery folder retained by Core. Refreshing SoundFonts preserves that warning and keeps re-rendering disabled. Ordinary render failures and successful rollbacks remain retryable when the audio toolchain is available. Manually reconcile the saved audio and metadata using those recovery files before restarting the app and loading that generation again. Restarting alone does not repair the files, and the app does not automatically reconcile recovery artifacts.
+If both the commit and rollback fail, the app clears playback and saved-SoundFont state and disables re-rendering for that generation for the rest of the running app process, including when selected from history again. MIDI remains available. Status shows "Audio recovery is required. MIDI is still available." followed by the recovery folder retained by Core. Refreshing SoundFonts preserves that warning and keeps re-rendering disabled. Ordinary render failures and successful rollbacks remain retryable when the audio toolchain is available. Core leaves the saved audio and metadata untouched; the recovery folder holds only the metadata that was not promoted, and Core removes the unreferenced new MP3 on the next successful re-render. Restart the app to re-render that generation again.
 
 ## History and Saved Generations
 
@@ -73,13 +73,13 @@ Click **History** to open the recent-generation sidebar. From there you can:
 
 Selecting an entry replaces the current audio, visualization, prompt, and generation controls, including unsaved edits. To restore the selected entry after editing controls, select another entry and then select it again. Selecting an entry for deletion also loads it; confirming deletion clears it from the main view.
 
-By default, the app keeps the newest 20 generations under its data directory:
+The app keeps every generation under its data directory until you delete it:
 
 ```text
 ~/.conductor/main/generations/
 └── gen_<id>/
     ├── loop.mid
-    ├── loop.mp3        # when audio rendering succeeds
+    ├── loop.mp3        # first render; re-renders use loop-<timestamp>.mp3
     ├── messages.json
     └── metadata.json
 ```

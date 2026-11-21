@@ -469,8 +469,8 @@ wheels = [
 
 [[package]]
 name = "conductor-core"
-version = "0.14.0"
-source = { git = "https://github.com/laceyp99/conductor-core.git?rev=v0.14.0#ab6afc425e24662452773e9ec62a7c3fe58e3074" }
+version = "0.15.0"
+source = { git = "https://github.com/laceyp99/conductor-core.git?rev=92d8964f051dd74e185a90f8f76a1f3016bcb4c4#92d8964f051dd74e185a90f8f76a1f3016bcb4c4" }
 dependencies = [
     { name = "mido" },
     { name = "pydantic" },
@@ -507,7 +507,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "conductor-core", extras = ["providers"], git = "https://github.com/laceyp99/conductor-core.git?rev=v0.14.0" },
+    { name = "conductor-core", extras = ["providers"], git = "https://github.com/laceyp99/conductor-core.git?rev=92d8964f051dd74e185a90f8f76a1f3016bcb4c4" },
     { name = "gradio", specifier = "==6.20.0" },
     { name = "mido", specifier = "==1.3.3" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.6,<10" },

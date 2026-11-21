@@ -4,7 +4,7 @@ This file is using Gradio for the Conductor application. It makes the generation
 Features:
 - Text to MIDI generation with multiple AI providers
 - Audio playback of generated MIDI using FluidSynth
-- Session history with persistent storage (up to 20 generations)
+- Session history with persistent storage (kept until deleted)
 - Toggleable history sidebar panel
 """
 
@@ -48,7 +48,6 @@ from conductor_main.visualization import PIANO_ROLL_HOVER_JS, visualize_midi_plo
 DEFAULT_PROVIDER = "Google"
 DEFAULT_TEMPERATURE = 0.1
 CONDUCTOR_APP_DIRNAME = "main"
-MAX_HISTORY_GENERATIONS = 20
 HISTORY_PROMPT_MAX_CHARS = 120
 DELETE_CONFIRMATION_PROMPT = "Confirm deletion of the selected generation."
 # 0 sends no num_ctx, so Ollama's own default applies.
@@ -165,10 +164,7 @@ APP_SOUNDFONT_DIR = _resolve_app_soundfont_dir()
 PROMPT_OVERRIDE_PATH = APP_DATA_DIR / "Prompts" / "loop gen.txt"
 
 add_soundfont_search_dir(APP_SOUNDFONT_DIR)
-HISTORY_STORE = FilesystemArtifactStore(
-    APP_DATA_DIR / "generations",
-    max_generations=MAX_HISTORY_GENERATIONS,
-)
+HISTORY_STORE = FilesystemArtifactStore(APP_DATA_DIR / "generations")
 # Recovery failures invalidate audio for every browser session in this process.
 _AUDIO_RECOVERY_ERRORS: dict[tuple[Path, str], str] = {}
 
@@ -955,7 +951,6 @@ def run_loop(
                 provider_credentials=credentials,
                 prompt_override=load_app_prompt_override(),
                 default_soundfont_path=selected_soundfont,
-                max_generations=MAX_HISTORY_GENERATIONS,
             )
         )
         request = GenerationRequest(

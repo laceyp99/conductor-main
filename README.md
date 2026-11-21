@@ -22,6 +22,14 @@ uv run --locked conductor-main
 
 The app opens at [http://127.0.0.1:7860/](http://127.0.0.1:7860/).
 
+Conductor Main installs Conductor Core v0.15.0 from the immutable commit below,
+never from a sibling checkout or mutable branch:
+
+```text
+https://github.com/laceyp99/conductor-core.git
+92d8964f051dd74e185a90f8f76a1f3016bcb4c4
+```
+
 To bind to a specific network interface and port:
 
 ```powershell

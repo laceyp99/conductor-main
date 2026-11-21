@@ -27,9 +27,7 @@ def isolated_app_data(monkeypatch, tmp_path):
     monkeypatch.setattr(
         app,
         "HISTORY_STORE",
-        app.FilesystemArtifactStore(
-            data_dir / "generations", max_generations=app.MAX_HISTORY_GENERATIONS
-        ),
+        app.FilesystemArtifactStore(data_dir / "generations"),
     )
 
 
@@ -139,7 +137,7 @@ def test_run_loop_passes_ui_configuration_to_core(monkeypatch, tmp_path):
     assert captured["config"].provider_credentials.google_api_key == "gemini-key"
     assert captured["config"].provider_credentials.anthropic_api_key == "claude-key"
     assert captured["config"].default_soundfont_path == "custom.sf2"
-    assert captured["config"].max_generations == app.MAX_HISTORY_GENERATIONS
+    assert captured["config"].max_generations is None
     assert captured["request"].effort == "low"
     assert captured["request"].ollama_num_ctx is None
     assert captured["request"].render_audio is True
@@ -1409,7 +1407,7 @@ def test_history_controls_preserve_ollama_when_service_unreachable(monkeypatch):
 
 
 def test_history_store_uses_the_app_retention_policy():
-    assert PRODUCTION_HISTORY_STORE.max_generations == app.MAX_HISTORY_GENERATIONS
+    assert PRODUCTION_HISTORY_STORE.max_generations is None
 
 
 def test_prompt_override_uses_the_app_data_directory(monkeypatch, tmp_path):
@@ -1563,12 +1561,14 @@ def test_rerender_current_audio_updates_saved_generation(
         )
     )
 
-    assert rerendered_audio_path == gen.audio_path
+    saved = app.get_generation(gen.id)
+    assert rerendered_audio_path == current_audio_path == saved.audio_path
+    assert Path(rerendered_audio_path).name.startswith("loop-")
     assert status == "Rendered audio with custom.sf2."
     assert saved_soundfont == "custom.sf2"
-    assert current_audio_path == gen.audio_path
-    assert Path(gen.audio_path).read_bytes() == b"rendered"
-    assert app.get_generation(gen.id).soundfont == "custom.sf2"
+    assert Path(rerendered_audio_path).read_bytes() == b"rendered"
+    assert not Path(gen.audio_path).exists()
+    assert saved.soundfont == "custom.sf2"
 
 
 def test_rerender_current_audio_reports_core_rendering_error(
@@ -1642,19 +1642,20 @@ def test_rerender_commit_failure_preserves_or_blocks_audio(
     )
 
     replace = core_storage.os.replace
-    audio_promoted = False
+    unlink = core_storage.os.unlink
 
     def fail_promotion(source, destination):
-        nonlocal audio_promoted
         if Path(destination).name == "metadata.json":
             raise OSError("metadata promotion failed")
-        if str(destination) == gen.audio_path:
-            if audio_promoted and rollback_fails:
-                raise OSError("audio rollback failed")
-            audio_promoted = True
         return replace(source, destination)
 
+    def fail_rollback(path, *args, **kwargs):
+        if rollback_fails and Path(path).name.startswith("loop-"):
+            raise OSError("audio rollback failed")
+        return unlink(path, *args, **kwargs)
+
     monkeypatch.setattr(core_storage.os, "replace", fail_promotion)
+    monkeypatch.setattr(core_storage.os, "unlink", fail_rollback)
     result = app.rerender_current_audio(
         gen.midi_path, "custom.sf2", "old.sf2", gen.id, gen.audio_path
     )

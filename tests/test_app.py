@@ -19,7 +19,6 @@ PRODUCTION_HISTORY_STORE = app.HISTORY_STORE
 def isolated_app_data(monkeypatch, tmp_path):
     """Keep UI callbacks away from personal history and saved prompts."""
     data_dir = tmp_path / "app-data"
-    monkeypatch.setattr(app, "_AUDIO_RECOVERY_ERRORS", {})
     monkeypatch.setattr(app, "APP_DATA_DIR", data_dir)
     monkeypatch.setattr(
         app, "PROMPT_OVERRIDE_PATH", data_dir / "Prompts" / "loop gen.txt"
@@ -1620,15 +1619,13 @@ def test_rerender_current_audio_preserves_state_on_store_failure(
         gen.midi_path, "custom.sf2", "old.sf2", gen.id, gen.audio_path
     ) == (gen.audio_path, str(failure), "old.sf2", gen.audio_path)
     assert (
-        app.get_rerender_button_update("custom.sf2", gen.midi_path, gen.id)[
-            "interactive"
-        ]
+        app.get_rerender_button_update("custom.sf2", gen.midi_path)["interactive"]
         is True
     )
 
 
 @pytest.mark.parametrize("rollback_fails", [False, True])
-def test_rerender_commit_failure_preserves_or_blocks_audio(
+def test_rerender_commit_failure_keeps_current_audio(
     monkeypatch, saved_audio_generation, rollback_fails
 ):
     gen = saved_audio_generation
@@ -1637,7 +1634,7 @@ def test_rerender_commit_failure_preserves_or_blocks_audio(
         app,
         "midi_to_mp3",
         lambda midi_path, output_path, soundfont_name: _write_binary_file(
-            Path(output_path)
+            Path(output_path), b"rendered"
         ),
     )
 
@@ -1656,61 +1653,32 @@ def test_rerender_commit_failure_preserves_or_blocks_audio(
 
     monkeypatch.setattr(core_storage.os, "replace", fail_promotion)
     monkeypatch.setattr(core_storage.os, "unlink", fail_rollback)
-    result = app.rerender_current_audio(
+    message = (
+        "Re-render could not be saved (metadata promotion failed). "
+        "Kept the current audio."
+        if rollback_fails
+        else "metadata promotion failed"
+    )
+    assert app.rerender_current_audio(
+        gen.midi_path, "custom.sf2", "old.sf2", gen.id, gen.audio_path
+    ) == (gen.audio_path, message, "old.sf2", gen.audio_path)
+    assert Path(gen.audio_path).read_bytes() == b"old audio"
+    assert app.get_generation(gen.id).soundfont == "old.sf2"
+
+    loaded = app.load_history_item(gen.id)
+    assert loaded[1] == loaded[7] == gen.audio_path
+    assert loaded[6] == "old.sf2"
+    assert app.loaded_history_status(gen.id) == "Loaded generation."
+
+    # A failed commit does not block the next re-render.
+    monkeypatch.setattr(core_storage.os, "replace", replace)
+    monkeypatch.setattr(core_storage.os, "unlink", unlink)
+    rerendered, status, saved_soundfont, _ = app.rerender_current_audio(
         gen.midi_path, "custom.sf2", "old.sf2", gen.id, gen.audio_path
     )
-    if not rollback_fails:
-        assert result == (
-            gen.audio_path,
-            "metadata promotion failed",
-            "old.sf2",
-            gen.audio_path,
-        )
-        assert Path(gen.audio_path).read_bytes() == b"old audio"
-        assert app.get_generation(gen.id).soundfont == "old.sf2"
-        assert app.audio_recovery_error(gen.id) is None
-        return
-
-    assert result[0] is result[2] is result[3] is None
-    recovery_dir = next(Path(gen.midi_path).parent.glob(".audio-*"))
-    assert recovery_dir.is_dir()
-    assert str(recovery_dir) in result[1]
-    assert result[1] == (
-        "Audio recovery is required. MIDI is still available. "
-        f"Recovery files: {recovery_dir}"
-    )
-
-    def unexpected_render(*args, **kwargs):
-        raise AssertionError(
-            "Blocked audio must not render or take the matching-font shortcut"
-        )
-
-    monkeypatch.setattr(app, "midi_to_mp3", unexpected_render)
-    assert (
-        app.rerender_current_audio(
-            gen.midi_path, "old.sf2", "old.sf2", gen.id, gen.audio_path
-        )
-        == result
-    )
-    loaded = app.load_history_item(gen.id)
-    assert loaded[0] == gen.midi_path
-    assert loaded[1] is loaded[6] is loaded[7] is None
-    assert str(recovery_dir) in loaded[4]
-    assert loaded[8]["interactive"] is False
-    refreshed = app.refresh_soundfont_controls("custom.sf2", gen.midi_path, gen.id)
-    assert refreshed[1]["interactive"] is False
-    assert refreshed[2] == result[1]
-    assert (
-        app.loaded_history_status(gen.id) == "Loaded MIDI. Audio recovery is required."
-    )
-
-    monkeypatch.setattr(app, "is_playback_available", lambda choice=None: (True, None))
-    assert (
-        app.get_rerender_button_update("custom.sf2", gen.midi_path, "other-generation")[
-            "interactive"
-        ]
-        is True
-    )
+    assert status == "Rendered audio with custom.sf2."
+    assert saved_soundfont == "custom.sf2"
+    assert Path(rerendered).read_bytes() == b"rendered"
 
 
 def test_load_history_item_warns_when_saved_soundfont_is_missing(monkeypatch, tmp_path):
@@ -2265,19 +2233,6 @@ def test_history_sidebar_uses_one_selector_and_confirmed_delete():
     # After generation, clear the previous selection so it can be selected again.
     assert dependencies["refresh_history_1"]["inputs"] == []
     assert dependencies["refresh_history_1"]["outputs"] == [selector]
-    rerender = dependencies["rerender_current_audio"]
-    generation_id = rerender["inputs"][3]
-    button_update = next(
-        dependency
-        for dependency in demo.config["dependencies"]
-        if dependency["trigger_after"] == rerender["id"]
-    )
-    assert button_update["inputs"][-1] == generation_id
-    assert dependencies["refresh_soundfont_controls"]["inputs"][-1] == generation_id
-    assert (
-        button_update["outputs"]
-        == dependencies["refresh_soundfont_controls"]["outputs"][1:2]
-    )
     sidebar_controls = [
         component["props"].get("label") or component["props"].get("value")
         for component in demo.config["components"]

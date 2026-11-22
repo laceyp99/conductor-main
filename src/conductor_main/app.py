@@ -4,7 +4,7 @@ This file is using Gradio for the Conductor application. It makes the generation
 Features:
 - Text to MIDI generation with multiple AI providers
 - Audio playback of generated MIDI using FluidSynth
-- Session history with persistent storage (up to 20 generations)
+- Session history with persistent storage (kept until deleted)
 - Toggleable history sidebar panel
 """
 
@@ -48,7 +48,6 @@ from conductor_main.visualization import PIANO_ROLL_HOVER_JS, visualize_midi_plo
 DEFAULT_PROVIDER = "Google"
 DEFAULT_TEMPERATURE = 0.1
 CONDUCTOR_APP_DIRNAME = "main"
-MAX_HISTORY_GENERATIONS = 20
 HISTORY_PROMPT_MAX_CHARS = 120
 DELETE_CONFIRMATION_PROMPT = "Confirm deletion of the selected generation."
 # 0 sends no num_ctx, so Ollama's own default applies.
@@ -165,12 +164,7 @@ APP_SOUNDFONT_DIR = _resolve_app_soundfont_dir()
 PROMPT_OVERRIDE_PATH = APP_DATA_DIR / "Prompts" / "loop gen.txt"
 
 add_soundfont_search_dir(APP_SOUNDFONT_DIR)
-HISTORY_STORE = FilesystemArtifactStore(
-    APP_DATA_DIR / "generations",
-    max_generations=MAX_HISTORY_GENERATIONS,
-)
-# Recovery failures invalidate audio for every browser session in this process.
-_AUDIO_RECOVERY_ERRORS: dict[tuple[Path, str], str] = {}
+HISTORY_STORE = FilesystemArtifactStore(APP_DATA_DIR / "generations")
 
 
 def load_history():
@@ -196,12 +190,6 @@ def get_generation(gen_id):
 
 def delete_generation(gen_id):
     return HISTORY_STORE.delete_generation(gen_id)
-
-
-def audio_recovery_error(gen_id):
-    return _AUDIO_RECOVERY_ERRORS.get(
-        (Path(HISTORY_STORE.artifact_root).resolve(), gen_id)
-    )
 
 
 def format_price_summary(price_value):
@@ -720,14 +708,9 @@ def rerender_available(soundfont_choice=None, midi_path=None):
     )
 
 
-def get_rerender_button_update(
-    soundfont_choice=None, midi_path=None, generation_id=None
-):
+def get_rerender_button_update(soundfont_choice=None, midi_path=None):
     """Build a button update for the current rerender availability."""
-    return gr.update(
-        interactive=not audio_recovery_error(generation_id)
-        and rerender_available(soundfont_choice, midi_path)
-    )
+    return gr.update(interactive=rerender_available(soundfont_choice, midi_path))
 
 
 def get_soundfont_status_message(soundfont_choice=None):
@@ -741,15 +724,12 @@ def get_soundfont_status_message(soundfont_choice=None):
     return f"Audio unavailable. {playback_error or 'Check audio setup.'}"
 
 
-def refresh_soundfont_controls(
-    soundfont_choice=None, midi_path=None, generation_id=None
-):
+def refresh_soundfont_controls(soundfont_choice=None, midi_path=None):
     """Refresh SoundFont UI controls from the filesystem."""
     return (
         get_soundfont_dropdown_update(soundfont_choice),
-        get_rerender_button_update(soundfont_choice, midi_path, generation_id),
-        audio_recovery_error(generation_id)
-        or get_soundfont_status_message(soundfont_choice),
+        get_rerender_button_update(soundfont_choice, midi_path),
+        get_soundfont_status_message(soundfont_choice),
     )
 
 
@@ -761,9 +741,6 @@ def rerender_current_audio(
     current_audio_path,
 ):
     """Re-render the current MIDI file with the selected SoundFont on demand."""
-    if recovery_error := audio_recovery_error(generation_id):
-        return None, recovery_error, None, None
-
     if not midi_path:
         return (
             current_audio_path,
@@ -819,14 +796,14 @@ def rerender_current_audio(
                 soundfont_name=selected_soundfont,
             )
     except AudioCommitRecoveryError as exc:
-        message = (
-            "Audio recovery is required. MIDI is still available. "
-            f"Recovery files: {exc.recovery_directory}"
+        # Core left the saved audio and metadata unchanged, so keep playing it.
+        return (
+            current_audio_path,
+            f"Re-render could not be saved ({exc.commit_error}). "
+            "Kept the current audio.",
+            saved_soundfont,
+            current_audio_path,
         )
-        _AUDIO_RECOVERY_ERRORS[
-            (Path(HISTORY_STORE.artifact_root).resolve(), generation_id)
-        ] = message
-        return None, message, None, None
     except (
         AudioRenderingError,
         AudioUpdateInProgressError,
@@ -955,7 +932,6 @@ def run_loop(
                 provider_credentials=credentials,
                 prompt_override=load_app_prompt_override(),
                 default_soundfont_path=selected_soundfont,
-                max_generations=MAX_HISTORY_GENERATIONS,
             )
         )
         request = GenerationRequest(
@@ -1119,8 +1095,6 @@ def get_history_choices():
 
 
 def loaded_history_status(gen_id):
-    if audio_recovery_error(gen_id):
-        return "Loaded MIDI. Audio recovery is required."
     return "Loaded generation." if gen_id else "Generation was not loaded."
 
 
@@ -1206,10 +1180,7 @@ def load_history_item(gen_id):
         )
 
     warnings = []
-    recovery_error = audio_recovery_error(gen_id)
-    saved_soundfont = None if recovery_error else gen.soundfont
-    if recovery_error:
-        warnings.append(recovery_error)
+    saved_soundfont = gen.soundfont
     if saved_soundfont:
         saved_soundfont_name = Path(gen.soundfont).name
         if saved_soundfont_name not in get_soundfont_choices():
@@ -1227,9 +1198,7 @@ def load_history_item(gen_id):
 
     # Get audio path if it exists
     audio_path = (
-        gen.audio_path
-        if not recovery_error and gen.audio_path and Path(gen.audio_path).exists()
-        else None
+        gen.audio_path if gen.audio_path and Path(gen.audio_path).exists() else None
     )
 
     return (
@@ -1241,7 +1210,7 @@ def load_history_item(gen_id):
         gen.id,
         saved_soundfont,
         audio_path,
-        get_rerender_button_update(saved_soundfont, gen.midi_path, gen_id),
+        get_rerender_button_update(saved_soundfont, gen.midi_path),
         *control_updates.as_tuple(),
     )
 
@@ -1267,9 +1236,7 @@ def delete_history_item(
             current_generation_id,
             current_saved_soundfont,
             current_audio_path,
-            get_rerender_button_update(
-                soundfont_choice, midi_path, current_generation_id
-            ),
+            get_rerender_button_update(soundfont_choice, midi_path),
         )
 
     success = delete_generation(gen_id)
@@ -1287,9 +1254,7 @@ def delete_history_item(
         None if deleted_active else current_saved_soundfont,
         None if deleted_active else current_audio_path,
         get_rerender_button_update(
-            soundfont_choice,
-            None if deleted_active else midi_path,
-            None if deleted_active else current_generation_id,
+            soundfont_choice, None if deleted_active else midi_path
         ),
     )
 
@@ -1612,7 +1577,7 @@ def create_demo(playback_status=None):
                         cancels=[gen_event],
                     ).then(
                         get_rerender_button_update,
-                        inputs=[soundfont_input, prog_output, current_generation_id],
+                        inputs=[soundfont_input, prog_output],
                         outputs=[rerender_button],
                     )
                     rerender_button.click(
@@ -1630,14 +1595,10 @@ def create_demo(playback_status=None):
                             current_saved_soundfont,
                             current_audio_path,
                         ],
-                    ).then(
-                        get_rerender_button_update,
-                        inputs=[soundfont_input, prog_output, current_generation_id],
-                        outputs=[rerender_button],
                     )
                     refresh_soundfonts_button.click(
                         refresh_soundfont_controls,
-                        inputs=[soundfont_input, prog_output, current_generation_id],
+                        inputs=[soundfont_input, prog_output],
                         outputs=[soundfont_input, rerender_button, error_message],
                     )
                     audio_output.pause(
@@ -1795,7 +1756,7 @@ def create_demo(playback_status=None):
 
         gen_event.then(
             get_rerender_button_update,
-            inputs=[soundfont_input, prog_output, current_generation_id],
+            inputs=[soundfont_input, prog_output],
             outputs=[rerender_button],
         ).then(
             refresh_history,

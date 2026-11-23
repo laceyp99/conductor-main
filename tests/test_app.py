@@ -1,4 +1,5 @@
 import asyncio
+import time
 from datetime import UTC
 from pathlib import Path
 from threading import Event, Thread
@@ -176,6 +177,55 @@ def test_run_loop_reports_core_generation_errors(monkeypatch):
 
     assert outputs[-1][3] == "provider failed"
     assert outputs[-1][4] == {"visible": False}
+
+
+def test_run_loop_returns_without_waiting_out_the_poll_timeout(monkeypatch, tmp_path):
+    midi_path = tmp_path / "loop.mid"
+    midi_path.write_bytes(b"midi")
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+    monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: None)
+    monkeypatch.setattr(app, "MidiFile", lambda path: "midi")
+    monkeypatch.setattr(app, "visualize_midi_plotly", lambda midi: "viz")
+
+    class QuickEngine:
+        def __init__(self, config):
+            pass
+
+        def generate(self, request, progress_callback=None):
+            progress_callback(SimpleNamespace(message="Saving MIDI..."))
+            # Finish after the wait loop has consumed the event and is blocked again.
+            time.sleep(0.05)
+            return SimpleNamespace(
+                midi_path=str(midi_path),
+                audio_path=None,
+                cost=0,
+                generation_id="fixed_id",
+                metadata=SimpleNamespace(soundfont=None),
+                warnings=[],
+            )
+
+    monkeypatch.setattr(app, "LoopGenerationEngine", QuickEngine)
+
+    started = time.monotonic()
+    outputs = list(
+        app.run_loop(
+            key="C",
+            scale="Major",
+            description="warm rhodes loop",
+            temp=0.3,
+            model_choice="gpt-test",
+            use_thinking=False,
+            effort="low",
+            soundfont_choice=None,
+            openai_key="",
+            gemini_key="",
+            claude_key="",
+        )
+    )
+
+    assert time.monotonic() - started < 0.3
+    assert [output[3] for output in outputs[1:-1]] == ["Saving MIDI..."]
+    assert outputs[-1][5] == "fixed_id"
 
 
 def test_run_loop_close_does_not_wait_for_in_flight_provider_call(monkeypatch):

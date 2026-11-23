@@ -972,32 +972,25 @@ def run_loop(
             request,
             handle_progress,
         )
+        # Core emits progress events synchronously inside generate(), so this None
+        # always lands after the last event and wakes the loop as soon as it is done.
+        future.add_done_callback(lambda _: progress_events.put(None))
         try:
-            # Poll for completion, yielding periodically so Gradio can interrupt the wait.
-            while not future.done():
+            # Yield at least every 0.5 s so Gradio can interrupt the wait.
+            while True:
                 try:
                     progress_event = progress_events.get(timeout=0.5)
-                    status_message = progress_event.message
                 except Empty:
                     status_message = "Generating MIDI..."
+                else:
+                    if progress_event is None:
+                        break
+                    status_message = progress_event.message
                 yield (
                     None,
                     None,
                     None,
                     status_message,
-                    gr.update(visible=True),
-                    None,
-                    None,
-                    None,
-                )
-
-            while not progress_events.empty():
-                progress_event = progress_events.get()
-                yield (
-                    None,
-                    None,
-                    None,
-                    progress_event.message,
                     gr.update(visible=True),
                     None,
                     None,

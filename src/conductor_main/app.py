@@ -1046,7 +1046,9 @@ def run_loop(
                 result.midi_path, selected_soundfont, result.generation_id
             )
             saved_soundfont = selected_soundfont
-        except AUDIO_RENDER_ERRORS as exc:
+        # Audio is optional: any render failure is a warning, so the outer handler
+        # never clears the MIDI that is already on screen.
+        except Exception as exc:
             warnings.append(f"Audio rendering failed. {exc}")
 
         # Leave the MIDI, piano roll, and generation ID as they are.

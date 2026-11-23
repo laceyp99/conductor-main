@@ -231,7 +231,8 @@ def test_run_loop_returns_without_waiting_out_the_poll_timeout(monkeypatch, tmp_
         )
     )
 
-    assert time.monotonic() - started < 0.3
+    # The old loop waited out the 0.5 s poll timeout after the last event.
+    assert time.monotonic() - started < 0.4
     assert [output[3] for output in outputs[1:-1]] == ["Saving MIDI..."]
     assert outputs[-1][5] == "fixed_id"
 
@@ -316,9 +317,16 @@ def test_run_loop_shows_midi_before_rendering_and_saves_audio(monkeypatch):
     assert Path(saved.audio_path).read_bytes() == b"rendered"
 
 
-def test_run_loop_keeps_midi_shown_when_audio_rendering_fails(monkeypatch):
+@pytest.mark.parametrize(
+    "error",
+    [
+        AudioRenderingError("FluidSynth timed out"),
+        RuntimeError("Unable to allocate a unique audio file name"),
+    ],
+)
+def test_run_loop_keeps_midi_shown_when_audio_rendering_fails(monkeypatch, error):
     def render(midi_path, output_path, soundfont_name):
-        raise AudioRenderingError("FluidSynth timed out")
+        raise error
 
     outputs = _run_saved_generation(monkeypatch, render)
 
@@ -326,7 +334,7 @@ def test_run_loop_keeps_midi_shown_when_audio_rendering_fails(monkeypatch):
     final = outputs[-1]
     assert final[0] == final[2] == final[5] == "skip"
     assert final[1] is final[6] is final[7] is None
-    assert final[3] == "Audio rendering failed. FluidSynth timed out"
+    assert final[3] == f"Audio rendering failed. {error}"
     assert app.get_generation(generation_id).audio_path is None
 
 

@@ -1,4 +1,5 @@
 import asyncio
+import time
 from datetime import UTC
 from pathlib import Path
 from threading import Event, Thread
@@ -88,6 +89,10 @@ def test_run_loop_passes_ui_configuration_to_core(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "load_app_prompt_override", lambda: "override prompt")
     monkeypatch.setattr(app, "MidiFile", lambda path: "midi")
     monkeypatch.setattr(app, "visualize_midi_plotly", lambda midi: "viz")
+    monkeypatch.setattr(app, "rerender_available", lambda choice, midi: False)
+    monkeypatch.setattr(
+        app, "get_soundfont_status_message", lambda choice: "Audio unavailable."
+    )
 
     class FakeEngine:
         def __init__(self, config):
@@ -105,7 +110,7 @@ def test_run_loop_passes_ui_configuration_to_core(monkeypatch, tmp_path):
                 cost=0.25,
                 generation_id="fixed_id",
                 metadata=SimpleNamespace(soundfont=None),
-                warnings=["Audio rendering was skipped or failed."],
+                warnings=["Dropped 1 overlapping note."],
             )
 
     monkeypatch.setattr(app, "LoopGenerationEngine", FakeEngine)
@@ -130,17 +135,17 @@ def test_run_loop_passes_ui_configuration_to_core(monkeypatch, tmp_path):
 
     assert final_output[0] == str(midi_path)
     assert final_output[2] == "viz"
-    assert final_output[3] == "Audio rendering was skipped or failed."
+    assert final_output[3] == (
+        "Dropped 1 overlapping note.\nAudio rendering was skipped. Audio unavailable."
+    )
     assert captured["config"].prompt_override == "override prompt"
     assert captured["config"].provider_credentials.openai_api_key == "openai-key"
     assert captured["config"].provider_credentials.google_api_key == "gemini-key"
     assert captured["config"].provider_credentials.anthropic_api_key == "claude-key"
-    assert captured["config"].default_soundfont_path == "custom.sf2"
     assert captured["config"].max_generations is None
     assert captured["request"].effort == "low"
     assert captured["request"].ollama_num_ctx is None
-    assert captured["request"].render_audio is True
-    assert captured["request"].soundfont_path == "custom.sf2"
+    assert captured["request"].render_audio is False
     assert captured["request"].description == "warm rhodes loop"
     assert captured["request"].key == "F#"
 
@@ -176,6 +181,161 @@ def test_run_loop_reports_core_generation_errors(monkeypatch):
 
     assert outputs[-1][3] == "provider failed"
     assert outputs[-1][4] == {"visible": False}
+
+
+def test_run_loop_returns_without_waiting_out_the_poll_timeout(monkeypatch, tmp_path):
+    midi_path = tmp_path / "loop.mid"
+    midi_path.write_bytes(b"midi")
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+    monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: None)
+    monkeypatch.setattr(app, "MidiFile", lambda path: "midi")
+    monkeypatch.setattr(app, "visualize_midi_plotly", lambda midi: "viz")
+    monkeypatch.setattr(app, "rerender_available", lambda choice, midi: False)
+    monkeypatch.setattr(
+        app, "get_soundfont_status_message", lambda choice: "Audio unavailable."
+    )
+
+    class QuickEngine:
+        def __init__(self, config):
+            pass
+
+        def generate(self, request, progress_callback=None):
+            progress_callback(SimpleNamespace(message="Saving MIDI..."))
+            # Finish after the wait loop has consumed the event and is blocked again.
+            time.sleep(0.05)
+            return SimpleNamespace(
+                midi_path=str(midi_path),
+                audio_path=None,
+                cost=0,
+                generation_id="fixed_id",
+                metadata=SimpleNamespace(soundfont=None),
+                warnings=[],
+            )
+
+    monkeypatch.setattr(app, "LoopGenerationEngine", QuickEngine)
+
+    started = time.monotonic()
+    outputs = list(
+        app.run_loop(
+            key="C",
+            scale="Major",
+            description="warm rhodes loop",
+            temp=0.3,
+            model_choice="gpt-test",
+            use_thinking=False,
+            effort="low",
+            soundfont_choice=None,
+            openai_key="",
+            gemini_key="",
+            claude_key="",
+        )
+    )
+
+    # The old loop waited out the 0.5 s poll timeout after the last event.
+    assert time.monotonic() - started < 0.4
+    assert [output[3] for output in outputs[1:-1]] == ["Saving MIDI..."]
+    assert outputs[-1][5] == "fixed_id"
+
+
+def _run_saved_generation(monkeypatch, render):
+    """Run run_loop against a real saved generation with audio rendering faked."""
+    monkeypatch.setattr(app.gr, "update", lambda **kwargs: kwargs)
+    monkeypatch.setattr(app.gr, "skip", lambda: "skip")
+    monkeypatch.setattr(app, "get_selected_soundfont", lambda choice=None: "custom.sf2")
+    monkeypatch.setattr(app, "rerender_available", lambda choice, midi: True)
+    monkeypatch.setattr(app, "MidiFile", lambda path: "midi")
+    monkeypatch.setattr(app, "visualize_midi_plotly", lambda midi: "viz")
+    outputs = []
+
+    class SavingEngine:
+        def __init__(self, config):
+            pass
+
+        def generate(self, request, progress_callback=None):
+            workspace = app.HISTORY_STORE.create_generation_workspace()
+            _write_binary_file(Path(workspace.midi_path))
+            metadata = app.HISTORY_STORE.finalize_generation(
+                workspace,
+                prompt=request.description,
+                key=request.key,
+                scale=request.scale,
+                model=request.model,
+                provider="Google",
+                temperature=request.temperature,
+            )
+            return SimpleNamespace(
+                midi_path=metadata.midi_path,
+                audio_path=None,
+                cost=0,
+                generation_id=metadata.id,
+                metadata=metadata,
+                warnings=[],
+            )
+
+    def record_render(midi_path, output_path, soundfont_name):
+        # The generator is lazy, so outputs holds everything yielded so far.
+        assert outputs[-1][0] == midi_path
+        assert outputs[-1][2] == "viz"
+        return render(midi_path, output_path, soundfont_name)
+
+    monkeypatch.setattr(app, "LoopGenerationEngine", SavingEngine)
+    monkeypatch.setattr(app, "midi_to_mp3", record_render)
+    for output in app.run_loop(
+        key="C",
+        scale="Major",
+        description="warm rhodes loop",
+        temp=0.3,
+        model_choice="gpt-test",
+        use_thinking=False,
+        effort="low",
+        soundfont_choice="custom.sf2",
+        openai_key="",
+        gemini_key="",
+        claude_key="",
+    ):
+        outputs.append(output)  # noqa: PERF402 - record_render reads it mid-run
+    return outputs
+
+
+def test_run_loop_shows_midi_before_rendering_and_saves_audio(monkeypatch):
+    def render(midi_path, output_path, soundfont_name):
+        return _write_binary_file(Path(output_path), b"rendered")
+
+    outputs = _run_saved_generation(monkeypatch, render)
+
+    midi_shown, final = outputs[-2], outputs[-1]
+    generation_id = midi_shown[5]
+    assert midi_shown[1] is None
+    assert midi_shown[3] == "Rendering audio..."
+    assert midi_shown[4] == {"visible": False}
+
+    saved = app.get_generation(generation_id)
+    assert final[0] == final[2] == final[5] == "skip"
+    assert final[1] == final[7] == saved.audio_path
+    assert final[6] == saved.soundfont == "custom.sf2"
+    assert final[3] == ""
+    assert Path(saved.audio_path).read_bytes() == b"rendered"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        AudioRenderingError("FluidSynth timed out"),
+        RuntimeError("Unable to allocate a unique audio file name"),
+    ],
+)
+def test_run_loop_keeps_midi_shown_when_audio_rendering_fails(monkeypatch, error):
+    def render(midi_path, output_path, soundfont_name):
+        raise error
+
+    outputs = _run_saved_generation(monkeypatch, render)
+
+    generation_id = outputs[-2][5]
+    final = outputs[-1]
+    assert final[0] == final[2] == final[5] == "skip"
+    assert final[1] is final[6] is final[7] is None
+    assert final[3] == f"Audio rendering failed. {error}"
+    assert app.get_generation(generation_id).audio_path is None
 
 
 def test_run_loop_close_does_not_wait_for_in_flight_provider_call(monkeypatch):

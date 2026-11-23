@@ -34,18 +34,19 @@ flowchart LR
     Core --> Provider[Selected model provider]
     Provider --> Core
     Core --> Save[Save MIDI and generation metadata]
-    Save --> Visualize[Build piano-roll visualization]
-    Save --> Audio{Audio tools available?}
-    Audio -->|Yes| Render[Render playback audio]
+    Save --> Visualize[Show MIDI download and piano roll]
+    Visualize --> Audio{Audio tools available?}
+    Audio -->|Yes| Render[Render and save playback audio]
     Audio -->|No| MidiOnly[MIDI remains available]
-    Visualize --> Results[Completed view]
-    Render --> Results
+    Render --> Results[Completed view]
     MidiOnly --> Results
 ```
 
 Conductor Main collects the settings and presents the results, while Core owns
 provider communication, structured response parsing, MIDI creation, persistence,
-and optional audio rendering.
+and audio rendering. The MIDI download and piano roll appear as soon as Core
+saves the generation; the audio player fills in once rendering finishes. If
+rendering fails, the MIDI stays on screen and the **Status** box shows why.
 
 ## Model-Specific Controls
 
@@ -74,7 +75,7 @@ Deleting the override file returns the app to Core's packaged prompt.
 
 ## Stop Waiting Behavior
 
-Generation runs in a background thread so Gradio can continue yielding status updates. **Stop Waiting** detaches the UI from the current wait, but it cannot cancel a provider request already in flight. The provider may still finish and incur cost after the UI stops displaying progress.
+Generation runs in a background thread so Gradio can continue yielding status updates. **Stop Waiting** detaches the UI from the current wait, but it cannot cancel a provider request already in flight. It is hidden once the MIDI appears, since the provider call is over by then. The provider may still finish and incur cost after the UI stops displaying progress. A generation that finishes after you stop waiting is saved without audio; load it from History and click Re-render Audio to add it.
 
 ```mermaid
 flowchart TD

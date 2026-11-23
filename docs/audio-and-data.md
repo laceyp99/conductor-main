@@ -79,7 +79,7 @@ The app keeps every generation under its data directory until you delete it:
 ~/.conductor/main/generations/
 └── gen_<id>/
     ├── loop.mid
-    ├── loop.mp3        # first render; re-renders use loop-<timestamp>.mp3
+    ├── loop-<timestamp>.mp3  # each render saves under a new name
     ├── messages.json
     └── metadata.json
 ```

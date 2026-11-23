@@ -733,6 +733,33 @@ def refresh_soundfont_controls(soundfont_choice=None, midi_path=None):
     )
 
 
+# Failures a render can raise; AudioCommitRecoveryError is an OSError.
+AUDIO_RENDER_ERRORS = (
+    AudioRenderingError,
+    AudioUpdateInProgressError,
+    OSError,
+    ValueError,
+)
+
+
+def render_saved_audio(midi_path, soundfont, generation_id, output_path=None):
+    """Render MIDI to MP3 and return the saved audio path.
+
+    With a generation ID, Core renders into a staging path and commits it to the
+    generation's metadata, so a failure leaves the saved audio untouched. Raises
+    one of AUDIO_RENDER_ERRORS on failure.
+    """
+    if not generation_id:
+        return midi_to_mp3(
+            midi_path,
+            output_path=output_path or str(Path(midi_path).with_suffix(".mp3")),
+            soundfont_name=soundfont,
+        )
+    with HISTORY_STORE.stage_generation_audio(generation_id) as stage:
+        midi_to_mp3(midi_path, output_path=stage.path, soundfont_name=soundfont)
+        return stage.commit(soundfont=soundfont).audio_path
+
+
 def rerender_current_audio(
     midi_path,
     soundfont_choice,
@@ -779,22 +806,9 @@ def rerender_current_audio(
         )
 
     try:
-        if generation_id:
-            with HISTORY_STORE.stage_generation_audio(generation_id) as stage:
-                midi_to_mp3(
-                    midi_path,
-                    output_path=stage.path,
-                    soundfont_name=selected_soundfont,
-                )
-                updated_generation = stage.commit(soundfont=selected_soundfont)
-            persisted_audio_path = updated_generation.audio_path
-        else:
-            persisted_audio_path = midi_to_mp3(
-                midi_path,
-                output_path=current_audio_path
-                or str(Path(midi_path).with_suffix(".mp3")),
-                soundfont_name=selected_soundfont,
-            )
+        persisted_audio_path = render_saved_audio(
+            midi_path, selected_soundfont, generation_id, current_audio_path
+        )
     except AudioCommitRecoveryError as exc:
         # Core left the saved audio and metadata unchanged, so keep playing it.
         return (
@@ -804,12 +818,7 @@ def rerender_current_audio(
             saved_soundfont,
             current_audio_path,
         )
-    except (
-        AudioRenderingError,
-        AudioUpdateInProgressError,
-        OSError,
-        ValueError,
-    ) as exc:
+    except AUDIO_RENDER_ERRORS as exc:
         return (
             current_audio_path,
             str(exc),
@@ -910,8 +919,10 @@ def run_loop(
     Yields:
          tuple: (file_path, audio_path, visualization, status_message, stop_button_update,
              generation_id, saved_soundfont, current_audio_path) - intermediate yields
-             show progress and keep the stop-waiting control visible, final yield contains the generated MIDI,
-             audio, and persisted audio metadata for rerendering.
+             show progress and keep the stop-waiting control visible. Once Core
+             returns, one yield shows the MIDI and piano roll and hides the control;
+             when audio is available, a last yield adds the rendered audio and its
+             saved SoundFont.
     """
     try:
         selected_soundfont = get_selected_soundfont(soundfont_choice)
@@ -931,7 +942,6 @@ def run_loop(
                 artifact_root=HISTORY_STORE.artifact_root,
                 provider_credentials=credentials,
                 prompt_override=load_app_prompt_override(),
-                default_soundfont_path=selected_soundfont,
             )
         )
         request = GenerationRequest(
@@ -942,8 +952,8 @@ def run_loop(
             temperature=temp,
             use_thinking=use_thinking,
             effort=effort,
-            render_audio=True,
-            soundfont_path=selected_soundfont,
+            # The client renders audio after showing MIDI; see below.
+            render_audio=False,
             ollama_num_ctx=int(ollama_num_ctx)
             if provider == "Ollama" and ollama_num_ctx
             else None,
@@ -1007,17 +1017,48 @@ def run_loop(
 
         print(f"Total cost: {result.cost}")
         visualization = visualize_midi_plotly(MidiFile(result.midi_path))
+        warnings = list(result.warnings)
+        render_audio = rerender_available(soundfont_choice, result.midi_path)
+        if not render_audio:
+            warnings.append(
+                "Audio rendering was skipped. "
+                + get_soundfont_status_message(soundfont_choice)
+            )
 
-        # Final yield with the completed result and hide the stop-waiting button.
+        # Show the saved MIDI before rendering audio. Stop Waiting is hidden from
+        # here on because its handler would clear this generation from the screen.
         yield (
             result.midi_path,
-            result.audio_path,
+            None,
             visualization,
-            "\n".join(result.warnings),
+            "\n".join([*warnings, "Rendering audio..."] if render_audio else warnings),
             gr.update(visible=False),
             result.generation_id,
-            result.metadata.soundfont,
-            result.audio_path,
+            None,
+            None,
+        )
+        if not render_audio:
+            return
+
+        audio_path = saved_soundfont = None
+        try:
+            audio_path = render_saved_audio(
+                result.midi_path, selected_soundfont, result.generation_id
+            )
+            saved_soundfont = selected_soundfont
+        except AUDIO_RENDER_ERRORS as exc:
+            warnings.append(f"Audio rendering failed. {exc}")
+
+        # Leave the MIDI, piano roll, and generation ID as they are.
+        yield (
+            gr.skip(),
+            audio_path,
+            gr.skip(),
+            "\n".join(warnings),
+            gr.skip(),
+            gr.skip(),
+            saved_soundfont,
+            audio_path,
         )
 
     except Exception as e:
